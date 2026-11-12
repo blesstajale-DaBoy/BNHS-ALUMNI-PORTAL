@@ -1,0 +1,6 @@
+{
+  "name": "Barobo National High School Alumni Portal",
+  "description": "Official online platform for Barobo National High School alumni to reconnect, register, browse the alumni directory, and join events.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,693 @@
+{
+  "entities": {
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted administrator registry entry for Barobo National High School Alumni Portal.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the administrator."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "minLength": 5,
+          "maxLength": 10,
+          "description": "Administrator role designation."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when admin record was created."
+        }
+      },
+      "required": ["uid", "role", "createdAt"]
+    },
+    "PortalSettings": {
+      "title": "PortalSettings",
+      "description": "Editable portal branding, animated logo, hero banner image, hero welcome copy, and directory section copy.",
+      "type": "object",
+      "properties": {
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the admin or user who updated the portal settings."
+        },
+        "logoUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150000,
+          "description": "URL or data URI of the school logo (animated GIF or image)."
+        },
+        "logoAnimated": {
+          "type": "boolean",
+          "description": "Whether animated GIF / emblem pulse animation is enabled."
+        },
+        "heroImageUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150000,
+          "description": "URL or data URI of the hero campus picture."
+        },
+        "schoolKicker": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "School header kicker text."
+        },
+        "portalSubtitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140,
+          "description": "Official alumni portal subtitle."
+        },
+        "welcomeTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Main hero welcome heading."
+        },
+        "mottoText": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140,
+          "description": "School alumni motto."
+        },
+        "welcomeDescription": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 600,
+          "description": "Hero welcome paragraph text."
+        },
+        "directoryKicker": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Directory section kicker text."
+        },
+        "directoryTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Directory section main heading."
+        },
+        "directoryDescription": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 500,
+          "description": "Directory section introductory text."
+        },
+        "facebookUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Official school Facebook page URL."
+        },
+        "twitterUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Official school Twitter/X profile URL."
+        },
+        "linkedinUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Official school LinkedIn page URL."
+        },
+        "heroCaptionLocation": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140,
+          "description": "Hero photo overlay location kicker."
+        },
+        "heroCaptionTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140,
+          "description": "Hero photo overlay headline."
+        },
+        "heroCaptionDescription": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 400,
+          "description": "Hero photo overlay description."
+        },
+        "footerSubtitle": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 300,
+          "description": "Editable footer location and motto subtitle."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public"],
+          "minLength": 6,
+          "maxLength": 6,
+          "description": "Public visibility flag."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of update."
+        }
+      },
+      "required": [
+        "authorId",
+        "logoUrl",
+        "logoAnimated",
+        "heroImageUrl",
+        "schoolKicker",
+        "portalSubtitle",
+        "welcomeTitle",
+        "mottoText",
+        "welcomeDescription",
+        "directoryKicker",
+        "directoryTitle",
+        "directoryDescription",
+        "facebookUrl",
+        "twitterUrl",
+        "linkedinUrl",
+        "heroCaptionLocation",
+        "heroCaptionTitle",
+        "heroCaptionDescription",
+        "footerSubtitle",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AlumniProfile": {
+      "title": "AlumniProfile",
+      "description": "Public directory profile of a registered Barobo National High School alumnus/alumna (PII isolated in AlumniPrivateInfo).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner Firebase Auth UID."
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Full name of the alumnus or alumna."
+        },
+        "photoUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150000,
+          "description": "Uploaded local photo data URI or Google/web image link."
+        },
+        "graduationYear": {
+          "type": "integer",
+          "description": "Year graduated from Barobo National High School (1971 to dynamic future years)."
+        },
+        "formerSection": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Former section or advisory class name at BNHS."
+        },
+        "strand": {
+          "type": "string",
+          "enum": ["STEM", "ABM", "HUMSS", "GAS", "TVL-ICT", "TVL-HE", "TVL-IA", "BEC / RBEC", "SPA / SPS"],
+          "minLength": 3,
+          "maxLength": 20,
+          "description": "Senior High School track/strand or curriculum batch."
+        },
+        "course": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "College degree, post-secondary course, or specialization."
+        },
+        "profession": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Current profession or occupation title."
+        },
+        "currentEmployment": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Current employer, organization, or institution."
+        },
+        "locationCity": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Current city and province/country of residence."
+        },
+        "bio": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "description": "Short alumni message, memory at BNHS, or professional summary."
+        },
+        "mentorshipRole": {
+          "type": "string",
+          "enum": ["none", "mentor", "mentee", "both"],
+          "minLength": 4,
+          "maxLength": 6,
+          "description": "Mentorship program opt-in status."
+        },
+        "industrySector": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Primary professional industry sector for mentor/mentee matching."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "private"],
+          "minLength": 6,
+          "maxLength": 7,
+          "description": "Directory visibility setting."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial registration."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest profile update."
+        }
+      },
+      "required": [
+        "uid",
+        "fullName",
+        "photoUrl",
+        "graduationYear",
+        "formerSection",
+        "strand",
+        "course",
+        "profession",
+        "currentEmployment",
+        "locationCity",
+        "bio",
+        "mentorshipRole",
+        "industrySector",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AlumniPrivateInfo": {
+      "title": "AlumniPrivateInfo",
+      "description": "Strictly isolated PII contact record for a registered alumnus/alumna, readable only by the owner or school admin.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner Firebase Auth UID."
+        },
+        "email": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 120,
+          "description": "Personal email address."
+        },
+        "phone": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 30,
+          "description": "Mobile or telephone contact number."
+        },
+        "homeAddress": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 200,
+          "description": "Complete residential or mailing address."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when private record was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when private record was updated."
+        }
+      },
+      "required": ["uid", "email", "phone", "homeAddress", "createdAt", "updatedAt"]
+    },
+    "AlumniEvent": {
+      "title": "AlumniEvent",
+      "description": "Official Barobo National High School alumni event, homecoming, or mentorship activity.",
+      "type": "object",
+      "properties": {
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID who created or updated the event."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 140,
+          "description": "Event title."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Homecoming", "Batch Reunion", "Career Mentorship", "Scholarship Drive", "Community Outreach"],
+          "minLength": 5,
+          "maxLength": 30,
+          "description": "Type of alumni event."
+        },
+        "eventDate": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 50,
+          "description": "Formatted date and time of the event."
+        },
+        "venue": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 140,
+          "description": "Venue or campus location."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1000,
+          "description": "Full event details and agenda."
+        },
+        "imageUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 150000,
+          "description": "Uploaded event photo data URI or Google/web image link."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["upcoming", "ongoing", "completed", "archived"],
+          "minLength": 7,
+          "maxLength": 10,
+          "description": "Lifecycle status of the event."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public"],
+          "minLength": 6,
+          "maxLength": 6,
+          "description": "Public visibility flag for secure list queries."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of update."
+        }
+      },
+      "required": [
+        "authorId",
+        "title",
+        "category",
+        "eventDate",
+        "venue",
+        "description",
+        "imageUrl",
+        "status",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "EventRsvp": {
+      "title": "EventRsvp",
+      "description": "Alumni attendance registration for a specific BNHS event.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Authenticated alumnus UID."
+        },
+        "eventId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Target event ID."
+        },
+        "attendeeName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Full name of the alumnus RSVPing."
+        },
+        "graduationYear": {
+          "type": "integer",
+          "description": "Graduation batch year."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["attending", "interested", "cancelled"],
+          "minLength": 9,
+          "maxLength": 10,
+          "description": "RSVP attendance status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when RSVP was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when RSVP was updated."
+        }
+      },
+      "required": ["uid", "eventId", "attendeeName", "graduationYear", "status", "createdAt", "updatedAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Official bulletin or news announcement from the BNHS Alumni Association.",
+      "type": "object",
+      "properties": {
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Admin or author UID."
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Display name and office of the author."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 150,
+          "description": "Headline of the announcement."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Official Bulletin", "Scholarship Grant", "Campus Development", "Batch Milestone"],
+          "minLength": 5,
+          "maxLength": 30,
+          "description": "Announcement category."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300,
+          "description": "Concise summary deck."
+        },
+        "content": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 2000,
+          "description": "Full announcement text."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["published", "archived"],
+          "minLength": 8,
+          "maxLength": 9,
+          "description": "Publication state."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public"],
+          "minLength": 6,
+          "maxLength": 6,
+          "description": "Public visibility flag for secure list queries."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of publication."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last edit."
+        }
+      },
+      "required": [
+        "authorId",
+        "authorName",
+        "title",
+        "category",
+        "summary",
+        "content",
+        "status",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SpotlightNomination": {
+      "title": "SpotlightNomination",
+      "description": "Alumni Spotlight success story or career milestone nomination.",
+      "type": "object",
+      "properties": {
+        "nominatorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Authenticated UID of the nominator."
+        },
+        "nominatorName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Full name of the nominator."
+        },
+        "nomineeName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Full name of the nominated alumnus/alumna."
+        },
+        "graduationYear": {
+          "type": "integer",
+          "description": "Graduation year of the nominee."
+        },
+        "strand": {
+          "type": "string",
+          "enum": ["STEM", "ABM", "HUMSS", "GAS", "TVL-ICT", "TVL-HE", "TVL-IA", "BEC / RBEC", "SPA / SPS"],
+          "minLength": 3,
+          "maxLength": 20,
+          "description": "Strand or curriculum of the nominee."
+        },
+        "profession": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Current role or profession of the nominee."
+        },
+        "milestoneTitle": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 140,
+          "description": "Headline of the career milestone or achievement."
+        },
+        "story": {
+          "type": "string",
+          "minLength": 15,
+          "maxLength": 800,
+          "description": "Short success story or impact quote."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public"],
+          "minLength": 6,
+          "maxLength": 6,
+          "description": "Public visibility flag for spotlight queries."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when nomination was submitted."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest update."
+        }
+      },
+      "required": [
+        "nominatorUid",
+        "nominatorName",
+        "nomineeName",
+        "graduationYear",
+        "strand",
+        "profession",
+        "milestoneTitle",
+        "story",
+        "visibility",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Trusted administrators collection."
+    },
+    "/portal_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/PortalSettings" },
+      "description": "Editable portal settings including animated GIF logo, hero picture, hero copy, and directory copy."
+    },
+    "/alumni_profiles/{uid}": {
+      "schema": { "$ref": "#/entities/AlumniProfile" },
+      "description": "Publicly searchable BNHS alumni directory profiles without PII."
+    },
+    "/alumni_private/{uid}": {
+      "schema": { "$ref": "#/entities/AlumniPrivateInfo" },
+      "description": "Isolated private contact details (email, phone, home address) accessible only to the owner and admins."
+    },
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/AlumniEvent" },
+      "description": "Official BNHS alumni events and homecomings."
+    },
+    "/event_rsvps/{rsvpId}": {
+      "schema": { "$ref": "#/entities/EventRsvp" },
+      "description": "Alumni event attendance RSVPs."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Official BNHS alumni association announcements and news."
+    },
+    "/spotlight_nominations/{nominationId}": {
+      "schema": { "$ref": "#/entities/SpotlightNomination" },
+      "description": "Alumni Spotlight success story nominations."
+    }
+  }
+}

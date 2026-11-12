@@ -1,0 +1,389 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isVerifiedUser() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'blesstajale@gmail.com'
+      );
+    }
+
+    // Validation Blueprints
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'role', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'role', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.role is string && data.role.size() == 5 && data.role == 'admin' &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPortalSettings(data) {
+      return data.keys().hasAll([
+          'authorId', 'logoUrl', 'logoAnimated', 'heroImageUrl',
+          'schoolKicker', 'portalSubtitle', 'welcomeTitle', 'mottoText',
+          'welcomeDescription', 'directoryKicker', 'directoryTitle',
+          'directoryDescription', 'facebookUrl', 'twitterUrl', 'linkedinUrl',
+          'heroCaptionLocation', 'heroCaptionTitle', 'heroCaptionDescription', 'footerSubtitle',
+          'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'authorId', 'logoUrl', 'logoAnimated', 'heroImageUrl',
+          'schoolKicker', 'portalSubtitle', 'welcomeTitle', 'mottoText',
+          'welcomeDescription', 'directoryKicker', 'directoryTitle',
+          'directoryDescription', 'facebookUrl', 'twitterUrl', 'linkedinUrl',
+          'heroCaptionLocation', 'heroCaptionTitle', 'heroCaptionDescription', 'footerSubtitle',
+          'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.authorId) &&
+        data.authorId == request.auth.uid &&
+        data.logoUrl is string && data.logoUrl.size() >= 1 && data.logoUrl.size() <= 150000 &&
+        data.logoAnimated is bool &&
+        data.heroImageUrl is string && data.heroImageUrl.size() >= 1 && data.heroImageUrl.size() <= 150000 &&
+        data.schoolKicker is string && data.schoolKicker.size() >= 2 && data.schoolKicker.size() <= 120 &&
+        data.portalSubtitle is string && data.portalSubtitle.size() >= 2 && data.portalSubtitle.size() <= 140 &&
+        data.welcomeTitle is string && data.welcomeTitle.size() >= 2 && data.welcomeTitle.size() <= 120 &&
+        data.mottoText is string && data.mottoText.size() >= 2 && data.mottoText.size() <= 140 &&
+        data.welcomeDescription is string && data.welcomeDescription.size() >= 5 && data.welcomeDescription.size() <= 600 &&
+        data.directoryKicker is string && data.directoryKicker.size() >= 2 && data.directoryKicker.size() <= 120 &&
+        data.directoryTitle is string && data.directoryTitle.size() >= 2 && data.directoryTitle.size() <= 140 &&
+        data.directoryDescription is string && data.directoryDescription.size() >= 5 && data.directoryDescription.size() <= 500 &&
+        data.facebookUrl is string && data.facebookUrl.size() >= 0 && data.facebookUrl.size() <= 500 &&
+        data.twitterUrl is string && data.twitterUrl.size() >= 0 && data.twitterUrl.size() <= 500 &&
+        data.linkedinUrl is string && data.linkedinUrl.size() >= 0 && data.linkedinUrl.size() <= 500 &&
+        data.heroCaptionLocation is string && data.heroCaptionLocation.size() >= 2 && data.heroCaptionLocation.size() <= 140 &&
+        data.heroCaptionTitle is string && data.heroCaptionTitle.size() >= 2 && data.heroCaptionTitle.size() <= 140 &&
+        data.heroCaptionDescription is string && data.heroCaptionDescription.size() >= 5 && data.heroCaptionDescription.size() <= 400 &&
+        data.footerSubtitle is string && data.footerSubtitle.size() >= 5 && data.footerSubtitle.size() <= 300 &&
+        data.visibility is string && data.visibility.size() == 6 && data.visibility == 'public' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAlumniProfile(data) {
+      return data.keys().hasAll([
+          'uid', 'fullName', 'photoUrl', 'graduationYear', 'formerSection', 'strand',
+          'course', 'profession', 'currentEmployment', 'locationCity',
+          'bio', 'mentorshipRole', 'industrySector', 'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'fullName', 'photoUrl', 'graduationYear', 'formerSection', 'strand',
+          'course', 'profession', 'currentEmployment', 'locationCity',
+          'bio', 'mentorshipRole', 'industrySector', 'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+        data.photoUrl is string && data.photoUrl.size() >= 0 && data.photoUrl.size() <= 150000 &&
+        data.graduationYear is int && data.graduationYear >= 1971 && data.graduationYear <= 2100 &&
+        data.formerSection is string && data.formerSection.size() >= 1 && data.formerSection.size() <= 60 &&
+        data.strand is string && data.strand.size() >= 3 && data.strand.size() <= 20 &&
+        data.strand in ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL-ICT', 'TVL-HE', 'TVL-IA', 'BEC / RBEC', 'SPA / SPS'] &&
+        data.course is string && data.course.size() >= 2 && data.course.size() <= 120 &&
+        data.profession is string && data.profession.size() >= 2 && data.profession.size() <= 100 &&
+        data.currentEmployment is string && data.currentEmployment.size() >= 2 && data.currentEmployment.size() <= 120 &&
+        data.locationCity is string && data.locationCity.size() >= 2 && data.locationCity.size() <= 100 &&
+        data.bio is string && data.bio.size() >= 1 && data.bio.size() <= 600 &&
+        data.mentorshipRole is string && data.mentorshipRole.size() >= 4 && data.mentorshipRole.size() <= 6 &&
+        data.mentorshipRole in ['none', 'mentor', 'mentee', 'both'] &&
+        data.industrySector is string && data.industrySector.size() >= 2 && data.industrySector.size() <= 80 &&
+        data.visibility is string && data.visibility.size() >= 6 && data.visibility.size() <= 7 &&
+        data.visibility in ['public', 'private'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAlumniPrivateInfo(data) {
+      return data.keys().hasAll(['uid', 'email', 'phone', 'homeAddress', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'phone', 'homeAddress', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.uid == request.auth.uid &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 30 &&
+        data.homeAddress is string && data.homeAddress.size() >= 5 && data.homeAddress.size() <= 200 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAlumniEvent(data) {
+      return data.keys().hasAll([
+          'authorId', 'title', 'category', 'eventDate', 'venue',
+          'description', 'imageUrl', 'status', 'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'authorId', 'title', 'category', 'eventDate', 'venue',
+          'description', 'imageUrl', 'status', 'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.authorId) &&
+        data.authorId == request.auth.uid &&
+        data.title is string && data.title.size() >= 5 && data.title.size() <= 140 &&
+        data.category is string && data.category.size() >= 5 && data.category.size() <= 30 &&
+        data.category in ['Homecoming', 'Batch Reunion', 'Career Mentorship', 'Scholarship Drive', 'Community Outreach'] &&
+        data.eventDate is string && data.eventDate.size() >= 4 && data.eventDate.size() <= 50 &&
+        data.venue is string && data.venue.size() >= 3 && data.venue.size() <= 140 &&
+        data.description is string && data.description.size() >= 10 && data.description.size() <= 1000 &&
+        data.imageUrl is string && data.imageUrl.size() >= 0 && data.imageUrl.size() <= 150000 &&
+        data.status is string && data.status.size() >= 7 && data.status.size() <= 10 &&
+        data.status in ['upcoming', 'ongoing', 'completed', 'archived'] &&
+        data.visibility is string && data.visibility.size() == 6 && data.visibility == 'public' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEventRsvp(data) {
+      return data.keys().hasAll([
+          'uid', 'eventId', 'attendeeName', 'graduationYear',
+          'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'eventId', 'attendeeName', 'graduationYear',
+          'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.uid == request.auth.uid &&
+        isValidId(data.eventId) &&
+        data.attendeeName is string && data.attendeeName.size() >= 2 && data.attendeeName.size() <= 100 &&
+        data.graduationYear is int && data.graduationYear >= 1971 && data.graduationYear <= 2100 &&
+        data.status is string && data.status.size() >= 9 && data.status.size() <= 10 &&
+        data.status in ['attending', 'interested', 'cancelled'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll([
+          'authorId', 'authorName', 'title', 'category', 'summary',
+          'content', 'status', 'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'authorId', 'authorName', 'title', 'category', 'summary',
+          'content', 'status', 'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.authorId) &&
+        data.authorId == request.auth.uid &&
+        data.authorName is string && data.authorName.size() >= 2 && data.authorName.size() <= 100 &&
+        data.title is string && data.title.size() >= 5 && data.title.size() <= 150 &&
+        data.category is string && data.category.size() >= 5 && data.category.size() <= 30 &&
+        data.category in ['Official Bulletin', 'Scholarship Grant', 'Campus Development', 'Batch Milestone'] &&
+        data.summary is string && data.summary.size() >= 10 && data.summary.size() <= 300 &&
+        data.content is string && data.content.size() >= 20 && data.content.size() <= 2000 &&
+        data.status is string && data.status.size() >= 8 && data.status.size() <= 9 &&
+        data.status in ['published', 'archived'] &&
+        data.visibility is string && data.visibility.size() == 6 && data.visibility == 'public' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSpotlightNomination(data) {
+      return data.keys().hasAll([
+          'nominatorUid', 'nominatorName', 'nomineeName', 'graduationYear',
+          'strand', 'profession', 'milestoneTitle', 'story',
+          'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'nominatorUid', 'nominatorName', 'nomineeName', 'graduationYear',
+          'strand', 'profession', 'milestoneTitle', 'story',
+          'visibility', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.nominatorUid) &&
+        data.nominatorUid == request.auth.uid &&
+        data.nominatorName is string && data.nominatorName.size() >= 2 && data.nominatorName.size() <= 100 &&
+        data.nomineeName is string && data.nomineeName.size() >= 2 && data.nomineeName.size() <= 100 &&
+        data.graduationYear is int && data.graduationYear >= 1971 && data.graduationYear <= 2100 &&
+        data.strand is string && data.strand.size() >= 3 && data.strand.size() <= 20 &&
+        data.strand in ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL-ICT', 'TVL-HE', 'TVL-IA', 'BEC / RBEC', 'SPA / SPS'] &&
+        data.profession is string && data.profession.size() >= 2 && data.profession.size() <= 100 &&
+        data.milestoneTitle is string && data.milestoneTitle.size() >= 5 && data.milestoneTitle.size() <= 140 &&
+        data.story is string && data.story.size() >= 15 && data.story.size() <= 800 &&
+        data.visibility is string && data.visibility.size() == 6 && data.visibility == 'public' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 1. Admins Registry
+    match /admins/{adminId} {
+      allow get: if isVerifiedUser() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list: if false;
+      allow create: if isAdmin() && isValidId(adminId) && isValidAdminRecord(incoming()) &&
+        incoming().uid == adminId &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(adminId);
+    }
+
+    // 2. Portal Settings (Logo, Hero Picture, Hero Copy, Directory Copy & Footer Copy)
+    match /portal_settings/{settingId} {
+      allow get: if isValidId(settingId) && existing().visibility == 'public';
+      allow list: if existing().visibility == 'public';
+      allow create: if isVerifiedUser() && isValidId(settingId) && isValidPortalSettings(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidPortalSettings(incoming()) && isValidId(settingId) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isVerifiedUser() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'authorId', 'logoUrl', 'logoAnimated', 'heroImageUrl',
+            'schoolKicker', 'portalSubtitle', 'welcomeTitle', 'mottoText',
+            'welcomeDescription', 'directoryKicker', 'directoryTitle',
+            'directoryDescription', 'facebookUrl', 'twitterUrl', 'linkedinUrl',
+            'heroCaptionLocation', 'heroCaptionTitle', 'heroCaptionDescription',
+            'footerSubtitle', 'updatedAt'
+          ])) ||
+          isAdmin()
+        );
+      allow delete: if isAdmin() && isValidId(settingId);
+    }
+
+    // 3. Public Alumni Directory Profiles (Zero PII)
+    match /alumni_profiles/{uid} {
+      allow get: if isValidId(uid) && (
+        existing().visibility == 'public' ||
+        (isSignedIn() && (request.auth.uid == uid || isAdmin()))
+      );
+      allow list: if existing().visibility == 'public' ||
+        (isSignedIn() && existing().uid == request.auth.uid);
+      allow create: if isVerifiedUser() && isValidId(uid) && isValidAlumniProfile(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidAlumniProfile(incoming()) && isValidId(uid) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isVerifiedUser() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'fullName', 'photoUrl', 'graduationYear', 'formerSection', 'strand',
+            'course', 'profession', 'currentEmployment', 'locationCity',
+            'bio', 'mentorshipRole', 'industrySector', 'visibility', 'updatedAt'
+          ])) ||
+          isAdmin()
+        );
+      allow delete: if isValidId(uid) && (isVerifiedUser() || isAdmin());
+    }
+
+    // 4. Isolated Alumni Private Contact Information (Strict PII Isolation)
+    match /alumni_private/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+      allow list: if false;
+      allow create: if isOwner(uid) && isValidId(uid) && isValidAlumniPrivateInfo(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/alumni_profiles/$(uid));
+      allow update: if isVerifiedUser() && isValidAlumniPrivateInfo(incoming()) && isValidId(uid) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isOwner(uid) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'email', 'phone', 'homeAddress', 'updatedAt'
+          ])) ||
+          isAdmin()
+        );
+      allow delete: if isValidId(uid) && (isOwner(uid) || isAdmin());
+    }
+
+    // 5. Official Alumni Events
+    match /events/{eventId} {
+      allow get: if isValidId(eventId) && existing().visibility == 'public';
+      allow list: if existing().visibility == 'public';
+      allow create: if isVerifiedUser() && isValidId(eventId) && isValidAlumniEvent(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidAlumniEvent(incoming()) && isValidId(eventId) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isVerifiedUser() && existing().status != 'archived' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'authorId', 'title', 'category', 'eventDate', 'venue', 'description', 'imageUrl', 'status', 'updatedAt'
+            ])) ||
+          isAdmin()
+        );
+      allow delete: if isValidId(eventId) && (isVerifiedUser() || isAdmin());
+    }
+
+    // 6. Event RSVPs
+    match /event_rsvps/{rsvpId} {
+      allow get: if isSignedIn() && isValidId(rsvpId) && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && existing().uid == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidId(rsvpId) && isValidEventRsvp(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isVerifiedUser() && isValidEventRsvp(incoming()) && isValidId(rsvpId) &&
+        incoming().uid == existing().uid &&
+        incoming().eventId == existing().eventId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isOwner(existing().uid) && existing().status != 'cancelled' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['attendeeName', 'graduationYear', 'status', 'updatedAt'])) ||
+          isAdmin()
+        );
+      allow delete: if isValidId(rsvpId) && (isOwner(existing().uid) || isAdmin());
+    }
+
+    // 7. Official Announcements
+    match /announcements/{announcementId} {
+      allow get: if isValidId(announcementId) && existing().visibility == 'public';
+      allow list: if existing().visibility == 'public';
+      allow create: if isVerifiedUser() && isValidId(announcementId) && isValidAnnouncement(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidAnnouncement(incoming()) && isValidId(announcementId) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isVerifiedUser() && existing().status != 'archived' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'authorId', 'authorName', 'title', 'category', 'summary', 'content', 'status', 'updatedAt'
+            ])) ||
+          isAdmin()
+        );
+      allow delete: if isValidId(announcementId) && (isVerifiedUser() || isAdmin());
+    }
+
+    // 8. Alumni Spotlight Nominations
+    match /spotlight_nominations/{nominationId} {
+      allow get: if isValidId(nominationId) && existing().visibility == 'public';
+      allow list: if existing().visibility == 'public';
+      allow create: if isVerifiedUser() && isValidId(nominationId) && isValidSpotlightNomination(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidSpotlightNomination(incoming()) && isValidId(nominationId) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isVerifiedUser() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'nominatorUid', 'nominatorName', 'nomineeName', 'graduationYear', 'strand', 'profession', 'milestoneTitle', 'story', 'updatedAt'
+            ])) ||
+          isAdmin()
+        );
+      allow delete: if isValidId(nominationId) && (isVerifiedUser() || isAdmin());
+    }
+  }
+}
