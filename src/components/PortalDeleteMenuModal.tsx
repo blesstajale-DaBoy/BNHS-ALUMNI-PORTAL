@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   Award,
   Calendar,
+  CheckCircle2,
+  Cloud,
   Megaphone,
   Search,
   Trash2,
@@ -152,7 +154,7 @@ export const PortalDeleteMenuModal: React.FC<PortalDeleteMenuModalProps> = ({
         }
       }
       setSelectedIds({});
-      setDeleteNotice(`Deleted & Auto-Synced ${removed} selected item(s).`);
+      setDeleteNotice(`Cloud Synced (Auto-Saved): Deleted ${removed} selected item(s).`);
     } finally {
       setBusy(false);
     }
@@ -168,13 +170,23 @@ export const PortalDeleteMenuModal: React.FC<PortalDeleteMenuModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="bg-[#450012] text-white p-4 sm:p-6 flex items-center justify-between border-b border-[#D4AF37]/40 shrink-0">
-          <div>
-            <p className="text-[11px] sm:text-xs uppercase tracking-widest text-[#D4AF37] font-bold flex items-center gap-1.5">
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Unified BNHS Portal Delete Menu · Auto-Sync Active</span>
-            </p>
-            <h2 className="font-display text-lg sm:text-2xl font-bold mt-0.5">
+        <div className="bg-[#450012] text-white p-4 sm:p-6 flex items-center justify-between gap-3 border-b border-[#D4AF37]/40 shrink-0">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[11px] sm:text-xs uppercase tracking-widest text-[#D4AF37] font-bold flex items-center gap-1.5">
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Unified BNHS Portal Delete Menu</span>
+              </p>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-400/50 text-[10px] font-bold text-emerald-200">
+                {busy ? (
+                  <Cloud className="w-3 h-3 text-[#D4AF37] animate-pulse" />
+                ) : (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                )}
+                <span>{busy ? 'Cloud Syncing (Auto-Saving)...' : 'Cloud Synced (Auto-Saved)'}</span>
+              </span>
+            </div>
+            <h2 className="font-display text-lg sm:text-2xl font-bold mt-1">
               Delete Directory Profiles, Events & Slides, Announcements or Spotlight Stories
             </h2>
           </div>
@@ -182,7 +194,7 @@ export const PortalDeleteMenuModal: React.FC<PortalDeleteMenuModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close Delete Menu"
-            className="text-white/75 hover:text-white p-1.5 rounded-lg hover:bg-white/10 cursor-pointer"
+            className="text-white/75 hover:text-white p-1.5 rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -300,7 +312,9 @@ export const PortalDeleteMenuModal: React.FC<PortalDeleteMenuModalProps> = ({
                       setBusy(true);
                       try {
                         await onDeleteAlumnusProfile(alum.uid, alum.fullName);
-                        setDeleteNotice(`Deleted "${alum.fullName}" from Directory.`);
+                        setDeleteNotice(
+                          `Cloud Synced (Auto-Saved): Deleted "${alum.fullName}" from Directory.`
+                        );
                       } finally {
                         setBusy(false);
                       }
@@ -351,7 +365,9 @@ export const PortalDeleteMenuModal: React.FC<PortalDeleteMenuModalProps> = ({
                           setBusy(true);
                           try {
                             await onDeleteEvent(ev.id, ev.title);
-                            setDeleteNotice(`Deleted event "${ev.title}".`);
+                            setDeleteNotice(
+                              `Cloud Synced (Auto-Saved): Deleted event "${ev.title}".`
+                            );
                           } finally {
                             setBusy(false);
                           }
@@ -382,7 +398,7 @@ export const PortalDeleteMenuModal: React.FC<PortalDeleteMenuModalProps> = ({
                                 try {
                                   await onDeleteEventSlide(ev.id, idx);
                                   setDeleteNotice(
-                                    `Removed slide #${idx + 1} from "${ev.title}".`
+                                    `Cloud Synced (Auto-Saved): Removed slide #${idx + 1} from "${ev.title}".`
                                   );
                                 } finally {
                                   setBusy(false);
@@ -434,7 +450,9 @@ export const PortalDeleteMenuModal: React.FC<PortalDeleteMenuModalProps> = ({
                       setBusy(true);
                       try {
                         await onDeleteAnnouncement(ann.id, ann.title);
-                        setDeleteNotice(`Deleted announcement "${ann.title}".`);
+                        setDeleteNotice(
+                          `Cloud Synced (Auto-Saved): Deleted announcement "${ann.title}".`
+                        );
                       } finally {
                         setBusy(false);
                       }
@@ -482,7 +500,9 @@ export const PortalDeleteMenuModal: React.FC<PortalDeleteMenuModalProps> = ({
                       setBusy(true);
                       try {
                         await onDeleteSpotlight(st.id, st.nomineeName);
-                        setDeleteNotice(`Deleted spotlight story for ${st.nomineeName}.`);
+                        setDeleteNotice(
+                          `Cloud Synced (Auto-Saved): Deleted spotlight story for ${st.nomineeName}.`
+                        );
                       } finally {
                         setBusy(false);
                       }

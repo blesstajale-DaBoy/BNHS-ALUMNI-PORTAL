@@ -3,6 +3,8 @@ import {
   Award,
   Calendar,
   Camera,
+  CheckCircle2,
+  Cloud,
   Edit3,
   Facebook,
   Images,
@@ -377,7 +379,9 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         twitterUrl: twitterUrl.trim(),
         linkedinUrl: linkedinUrl.trim(),
       });
-      setSaveNotice('Saved & Auto-Synced: Portal Logo, Hero Picture, Captions, Directory Header, Footer & Social Links.');
+      setSaveNotice(
+        'Cloud Synced (Auto-Saved): Portal Logo, Hero Picture, Captions, Directory Header, Footer & Social Links.'
+      );
     } finally {
       setSaving(false);
     }
@@ -451,7 +455,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
       await onSaveEvent(record, isNew);
       setSelectedEventId(targetId);
       setSaveNotice(
-        `Saved & Auto-Synced ${evCategory} event "${cleanTitle}" with ${validSlides.length} sliding photo(s).`
+        `Cloud Synced (Auto-Saved): ${evCategory} event "${cleanTitle}" with ${validSlides.length} sliding photo(s).`
       );
     } finally {
       setSaving(false);
@@ -498,7 +502,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         visibility: 'public',
       };
       await onSaveAlumnusProfile(updated);
-      setSaveNotice(`Saved & Auto-Synced Directory Profile for ${updated.fullName}.`);
+      setSaveNotice(`Cloud Synced (Auto-Saved): Directory Profile for ${updated.fullName}.`);
     } finally {
       setSaving(false);
     }
@@ -532,7 +536,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
       };
       await onSaveAnnouncement(record, isNew);
       setSelectedAnnId(targetId);
-      setSaveNotice(`Saved & Auto-Synced Official Announcement "${cleanTitle}".`);
+      setSaveNotice(`Cloud Synced (Auto-Saved): Official Announcement "${cleanTitle}".`);
     } finally {
       setSaving(false);
     }
@@ -574,7 +578,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
       };
       await onSaveSpotlight(record, isNew);
       setSelectedSpotId(targetId);
-      setSaveNotice(`Saved & Auto-Synced Spotlight Milestone for ${cleanNominee}.`);
+      setSaveNotice(`Cloud Synced (Auto-Saved): Spotlight Milestone for ${cleanNominee}.`);
     } finally {
       setSaving(false);
     }
@@ -590,13 +594,23 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="bg-[#450012] text-white p-4 sm:p-6 flex items-center justify-between border-b border-[#D4AF37]/40 shrink-0">
-          <div>
-            <p className="text-[11px] sm:text-xs uppercase tracking-widest text-[#D4AF37] font-bold flex items-center gap-1.5">
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>Unified BNHS Portal Edit Menu · Auto-Sync Active</span>
-            </p>
-            <h2 className="font-display text-lg sm:text-2xl font-bold mt-0.5">
+        <div className="bg-[#450012] text-white p-4 sm:p-6 flex items-center justify-between gap-3 border-b border-[#D4AF37]/40 shrink-0">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[11px] sm:text-xs uppercase tracking-widest text-[#D4AF37] font-bold flex items-center gap-1.5">
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Unified BNHS Portal Edit Menu</span>
+              </p>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-400/50 text-[10px] font-bold text-emerald-200">
+                {saving ? (
+                  <Cloud className="w-3 h-3 text-[#D4AF37] animate-pulse" />
+                ) : (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                )}
+                <span>{saving ? 'Cloud Syncing (Auto-Saving)...' : 'Cloud Synced (Auto-Saved)'}</span>
+              </span>
+            </div>
+            <h2 className="font-display text-lg sm:text-2xl font-bold mt-1">
               Edit Portal Branding, Events, Directory, Announcements & Spotlight
             </h2>
           </div>
@@ -604,7 +618,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close Edit Menu"
-            className="text-white/75 hover:text-white p-1.5 rounded-lg hover:bg-white/10 cursor-pointer"
+            className="text-white/75 hover:text-white p-1.5 rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>

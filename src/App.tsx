@@ -86,7 +86,12 @@ const STORAGE_KEYS = {
   deletedSpotlights: 'bnhs_deleted_spotlights_v2',
   rsvps: 'bnhs_local_rsvps_v2',
   directUser: 'bnhs_direct_portal_user_v2',
+  hasLocalSettingsEdit: 'bnhs_has_local_settings_edit_v2',
 };
+
+function isValidFirestoreId(id: string): boolean {
+  return typeof id === 'string' && id.length >= 1 && id.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(id);
+}
 
 interface DirectPortalUser {
   uid: string;
@@ -216,8 +221,9 @@ export default function App() {
   // Online Alumni Registration Modal State
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
 
-  // Track if first mount already hydrated so Auto-Sync triggers cleanly on changes
+  // Track if first mount already hydrated & which Firebase UID session already auto-synced
   const autoSyncMountedRef = useRef(false);
+  const syncedSessionUidRef = useRef<string | null>(null);
 
   // Firestore & Local Persisted Collections
   const [firestoreProfiles, setFirestoreProfiles] = useState<AlumniProfileRecord[]>([]);
@@ -347,6 +353,9 @@ export default function App() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
+      if (!user) {
+        syncedSessionUidRef.current = null;
+      }
       setAuthReady(true);
     });
     return () => unsub();
@@ -817,6 +826,348 @@ export default function App() {
     }
   };
 
+  // Build Firestore-safe portal settings payload
+  const buildPortalSettingsPayload = (merged: PortalSettingsRecord, authorUid: string) => ({
+    authorId: authorUid,
+    logoUrl: sanitizeString(merged.logoUrl || DEFAULT_PORTAL_SETTINGS.logoUrl, 150000),
+    logoAnimated: Boolean(merged.logoAnimated),
+    heroImageUrl: sanitizeString(
+      merged.heroImageUrl || DEFAULT_PORTAL_SETTINGS.heroImageUrl,
+      150000
+    ),
+    schoolKicker: sanitizeString(
+      merged.schoolKicker || DEFAULT_PORTAL_SETTINGS.schoolKicker,
+      120
+    ),
+    portalSubtitle: sanitizeString(
+      merged.portalSubtitle || DEFAULT_PORTAL_SETTINGS.portalSubtitle,
+      140
+    ),
+    welcomeTitle: sanitizeString(
+      merged.welcomeTitle || DEFAULT_PORTAL_SETTINGS.welcomeTitle,
+      120
+    ),
+    mottoText: sanitizeString(merged.mottoText || DEFAULT_PORTAL_SETTINGS.mottoText, 140),
+    welcomeDescription: sanitizeString(
+      merged.welcomeDescription || DEFAULT_PORTAL_SETTINGS.welcomeDescription,
+      600
+    ),
+    directoryKicker: sanitizeString(
+      merged.directoryKicker || DEFAULT_PORTAL_SETTINGS.directoryKicker,
+      120
+    ),
+    directoryTitle: sanitizeString(
+      merged.directoryTitle || DEFAULT_PORTAL_SETTINGS.directoryTitle,
+      140
+    ),
+    directoryDescription: sanitizeString(
+      merged.directoryDescription || DEFAULT_PORTAL_SETTINGS.directoryDescription,
+      500
+    ),
+    facebookUrl: sanitizeString(merged.facebookUrl ?? '', 500),
+    twitterUrl: sanitizeString(merged.twitterUrl ?? '', 500),
+    linkedinUrl: sanitizeString(merged.linkedinUrl ?? '', 500),
+    heroCaptionLocation: sanitizeString(
+      merged.heroCaptionLocation || DEFAULT_PORTAL_SETTINGS.heroCaptionLocation,
+      140
+    ),
+    heroCaptionTitle: sanitizeString(
+      merged.heroCaptionTitle || DEFAULT_PORTAL_SETTINGS.heroCaptionTitle,
+      140
+    ),
+    heroCaptionDescription: sanitizeString(
+      merged.heroCaptionDescription || DEFAULT_PORTAL_SETTINGS.heroCaptionDescription,
+      400
+    ),
+    footerSubtitle: sanitizeString(
+      merged.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle,
+      240
+    ),
+    visibility: 'public' as const,
+    updatedAt: serverTimestamp(),
+  });
+
+  // Sync all pending local edits and deletions to Cloud Firestore when verified
+  const syncAllPendingChangesToCloud = async (user: User, includePortalSettings: boolean) => {
+    if (!user || !user.emailVerified) return;
+
+    const shouldPushSettings =
+      includePortalSettings ||
+      loadJsonFromStorage<boolean>(STORAGE_KEYS.hasLocalSettingsEdit, false);
+
+    if (shouldPushSettings) {
+      try {
+        const settingsRef = doc(db, 'portal_settings', 'main');
+        const snap = await getDoc(settingsRef);
+        const payload = buildPortalSettingsPayload(portalSettings, user.uid);
+        if (snap.exists()) {
+          await updateDoc(settingsRef, payload);
+        } else {
+          await setDoc(settingsRef, { ...payload, createdAt: serverTimestamp() });
+        }
+        saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, false);
+      } catch (err) {
+        console.warn('Portal settings cloud sync notice:', err);
+      }
+    }
+
+    // Sync pending alumni profile overrides
+    for (const prof of Object.values(localProfileOverrides)) {
+      if (deletedProfileUids[prof.uid] || !isValidFirestoreId(prof.uid)) continue;
+      const cleanName = sanitizeString(prof.fullName, 100);
+      const cleanSection = sanitizeString(prof.formerSection || 'Section A', 60);
+      const cleanCourse = sanitizeString(prof.course || 'BS General', 120);
+      const cleanProf = sanitizeString(prof.profession || 'Alumnus', 100);
+      const cleanEmp = sanitizeString(prof.currentEmployment || 'BNHS Chapter', 120);
+      const cleanCity = sanitizeString(prof.locationCity || 'Barobo, Surigao del Sur', 100);
+      const cleanBio = sanitizeString(prof.bio || 'Once a Student, Always an Eagle!', 600);
+      const cleanSector = sanitizeString(prof.industrySector || 'Engineering & Architecture', 80);
+      if (
+        cleanName.length < 2 ||
+        cleanSection.length < 1 ||
+        cleanCourse.length < 2 ||
+        cleanProf.length < 2 ||
+        cleanEmp.length < 2 ||
+        cleanCity.length < 2 ||
+        cleanBio.length < 1 ||
+        cleanSector.length < 2
+      ) {
+        continue;
+      }
+      try {
+        const ref = doc(db, 'alumni_profiles', prof.uid);
+        const snap = await getDoc(ref);
+        const payload = {
+          uid: prof.uid,
+          fullName: cleanName,
+          graduationYear: Math.min(2100, Math.max(1971, Number(prof.graduationYear) || 2020)),
+          formerSection: cleanSection,
+          strand: prof.strand || 'STEM',
+          course: cleanCourse,
+          profession: cleanProf,
+          currentEmployment: cleanEmp,
+          locationCity: cleanCity,
+          bio: cleanBio,
+          mentorshipRole: prof.mentorshipRole || 'none',
+          industrySector: cleanSector,
+          photoUrl: sanitizeString(prof.photoUrl || '', 150000),
+          visibility: 'public' as const,
+          updatedAt: serverTimestamp(),
+        };
+        if (snap.exists()) {
+          await updateDoc(ref, payload);
+        } else {
+          await setDoc(ref, { ...payload, createdAt: serverTimestamp() });
+        }
+      } catch (err) {
+        console.warn('Profile cloud sync notice:', err);
+      }
+    }
+
+    // Sync pending profile deletions
+    for (const [uid, isDeleted] of Object.entries(deletedProfileUids)) {
+      if (!isDeleted || !isValidFirestoreId(uid)) continue;
+      try {
+        const ref = doc(db, 'alumni_profiles', uid);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await deleteDoc(ref);
+        }
+      } catch (err) {
+        console.warn('Profile deletion cloud sync notice:', err);
+      }
+    }
+
+    // Sync pending event overrides
+    for (const ev of Object.values(localEventOverrides)) {
+      if (deletedEventIds[ev.id] || !isValidFirestoreId(ev.id)) continue;
+      const cleanTitle = sanitizeString(ev.title, 140);
+      const cleanDate = sanitizeString(ev.eventDate, 50);
+      const cleanVenue = sanitizeString(ev.venue, 140);
+      const cleanDesc = sanitizeString(ev.description, 1000);
+      if (cleanTitle.length < 5 || cleanDate.length < 4 || cleanVenue.length < 3 || cleanDesc.length < 10) {
+        continue;
+      }
+      const cleanSlides = Array.from(
+        new Set([...(ev.galleryUrls || []), ...(ev.imageUrl ? [ev.imageUrl] : [])])
+      )
+        .filter((u) => typeof u === 'string' && u.trim().length > 0)
+        .slice(0, 10)
+        .map((u) => sanitizeString(u, 150000));
+      const primaryImg = cleanSlides[0] || sanitizeString(ev.imageUrl || BNHS_ASSETS.homecomingEvent, 150000);
+      try {
+        const eventRef = doc(db, 'events', ev.id);
+        const snap = await getDoc(eventRef);
+        const payload = {
+          authorId: user.uid,
+          title: cleanTitle,
+          category: ev.category,
+          eventDate: cleanDate,
+          venue: cleanVenue,
+          description: cleanDesc,
+          imageUrl: primaryImg,
+          galleryUrls: cleanSlides.length > 0 ? cleanSlides : [primaryImg],
+          status: ev.status || 'upcoming',
+          visibility: 'public' as const,
+          updatedAt: serverTimestamp(),
+        };
+        if (snap.exists()) {
+          await updateDoc(eventRef, payload);
+        } else {
+          await setDoc(eventRef, { ...payload, createdAt: serverTimestamp() });
+        }
+      } catch (err) {
+        console.warn('Event cloud sync notice:', err);
+      }
+    }
+
+    // Sync pending event deletions
+    for (const [eventId, isDeleted] of Object.entries(deletedEventIds)) {
+      if (!isDeleted || !isValidFirestoreId(eventId)) continue;
+      try {
+        const ref = doc(db, 'events', eventId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await deleteDoc(ref);
+        }
+      } catch (err) {
+        console.warn('Event deletion cloud sync notice:', err);
+      }
+    }
+
+    // Sync pending announcement overrides
+    for (const ann of Object.values(localAnnouncementOverrides)) {
+      if (deletedAnnouncementIds[ann.id] || !isValidFirestoreId(ann.id)) continue;
+      const cleanAuthor = sanitizeString(ann.authorName || 'BNHS Alumni Federation', 100);
+      const cleanTitle = sanitizeString(ann.title, 150);
+      const cleanSummary = sanitizeString(ann.summary, 300);
+      const cleanContent = sanitizeString(ann.content, 2000);
+      if (
+        cleanAuthor.length < 2 ||
+        cleanTitle.length < 5 ||
+        cleanSummary.length < 10 ||
+        cleanContent.length < 20
+      ) {
+        continue;
+      }
+      try {
+        const annRef = doc(db, 'announcements', ann.id);
+        const snap = await getDoc(annRef);
+        const payload = {
+          authorId: user.uid,
+          authorName: cleanAuthor,
+          title: cleanTitle,
+          category: ann.category,
+          summary: cleanSummary,
+          content: cleanContent,
+          status: 'published' as const,
+          visibility: 'public' as const,
+          updatedAt: serverTimestamp(),
+        };
+        if (snap.exists()) {
+          await updateDoc(annRef, payload);
+        } else {
+          await setDoc(annRef, { ...payload, createdAt: serverTimestamp() });
+        }
+      } catch (err) {
+        console.warn('Announcement cloud sync notice:', err);
+      }
+    }
+
+    // Sync pending announcement deletions
+    for (const [annId, isDeleted] of Object.entries(deletedAnnouncementIds)) {
+      if (!isDeleted || !isValidFirestoreId(annId)) continue;
+      try {
+        const ref = doc(db, 'announcements', annId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await deleteDoc(ref);
+        }
+      } catch (err) {
+        console.warn('Announcement deletion cloud sync notice:', err);
+      }
+    }
+
+    // Sync pending spotlight overrides
+    for (const st of Object.values(localSpotlightOverrides)) {
+      if (deletedSpotlightIds[st.id] || !isValidFirestoreId(st.id)) continue;
+      const cleanNominator = sanitizeString(st.nominatorName || 'BNHS Alumni Federation', 100);
+      const cleanNominee = sanitizeString(st.nomineeName, 100);
+      const cleanProfession = sanitizeString(st.profession, 100);
+      const cleanMilestone = sanitizeString(st.milestoneTitle, 140);
+      const cleanStory = sanitizeString(st.story, 800);
+      if (
+        cleanNominator.length < 2 ||
+        cleanNominee.length < 2 ||
+        cleanProfession.length < 2 ||
+        cleanMilestone.length < 5 ||
+        cleanStory.length < 15
+      ) {
+        continue;
+      }
+      try {
+        const spotRef = doc(db, 'spotlight_nominations', st.id);
+        const snap = await getDoc(spotRef);
+        const payload = {
+          nominatorUid: user.uid,
+          nominatorName: cleanNominator,
+          nomineeName: cleanNominee,
+          graduationYear: Math.min(2100, Math.max(1971, Number(st.graduationYear) || 2020)),
+          strand: st.strand || 'STEM',
+          profession: cleanProfession,
+          milestoneTitle: cleanMilestone,
+          story: cleanStory,
+          visibility: 'public' as const,
+          updatedAt: serverTimestamp(),
+        };
+        if (snap.exists()) {
+          await updateDoc(spotRef, payload);
+        } else {
+          await setDoc(spotRef, { ...payload, createdAt: serverTimestamp() });
+        }
+      } catch (err) {
+        console.warn('Spotlight cloud sync notice:', err);
+      }
+    }
+
+    // Sync pending spotlight deletions
+    for (const [storyId, isDeleted] of Object.entries(deletedSpotlightIds)) {
+      if (!isDeleted || !isValidFirestoreId(storyId)) continue;
+      try {
+        const ref = doc(db, 'spotlight_nominations', storyId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await deleteDoc(ref);
+        }
+      } catch (err) {
+        console.warn('Spotlight deletion cloud sync notice:', err);
+      }
+    }
+  };
+
+  // Automatically sync pending local changes to Cloud Firestore when verified Google session signs in
+  useEffect(() => {
+    if (!authReady || !firebaseUser || !firebaseUser.emailVerified) return;
+    if (syncedSessionUidRef.current === firebaseUser.uid) return;
+    syncedSessionUidRef.current = firebaseUser.uid;
+
+    let cancelled = false;
+    (async () => {
+      setCloudSyncStatus('syncing');
+      await syncAllPendingChangesToCloud(firebaseUser, false);
+      if (!cancelled) {
+        setCloudSyncStatus('synced');
+        setLastSyncedTime(
+          new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, firebaseUser]);
+
   // Manual & Automatic Cloud Sync Handler
   const handleManualCloudSync = async () => {
     setCloudSyncStatus('syncing');
@@ -831,9 +1182,9 @@ export default function App() {
     saveJsonToStorage(STORAGE_KEYS.deletedSpotlights, deletedSpotlightIds);
     saveJsonToStorage(STORAGE_KEYS.rsvps, myRsvps);
 
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified) {
       try {
-        await handleSavePortalSettings(portalSettings);
+        await syncAllPendingChangesToCloud(firebaseUser, true);
       } catch (err) {
         console.warn('Cloud sync warning:', err);
       }
@@ -842,7 +1193,11 @@ export default function App() {
     setCloudSyncStatus('synced');
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setLastSyncedTime(nowStr);
-    setAdminToast(`Auto-Sync Verified (${nowStr}) — All portal edits, photos, and deletions are saved.`);
+    setAdminToast(
+      firebaseUser && firebaseUser.emailVerified
+        ? `Cloud Synced (Auto-Saved) · ${nowStr} — All portal edits, photos, and deletions are saved to Cloud Firestore.`
+        : `Cloud Synced (Auto-Saved) · ${nowStr} — All portal edits, photos, and deletions are saved automatically.`
+    );
   };
 
   // Persist Portal Settings (Logo, Hero Picture, Welcome Text, Directory Header, Hero Caption, Footer Subtitle)
@@ -855,71 +1210,14 @@ export default function App() {
     };
     setPortalSettings(merged);
     saveJsonToStorage(STORAGE_KEYS.settings, merged);
+    saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
     setCloudSyncStatus('syncing');
 
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified) {
       try {
         const settingsRef = doc(db, 'portal_settings', 'main');
         const snap = await getDoc(settingsRef);
-        const payload = {
-          authorId: firebaseUser.uid,
-          logoUrl: sanitizeString(merged.logoUrl || DEFAULT_PORTAL_SETTINGS.logoUrl, 150000),
-          logoAnimated: Boolean(merged.logoAnimated),
-          heroImageUrl: sanitizeString(
-            merged.heroImageUrl || DEFAULT_PORTAL_SETTINGS.heroImageUrl,
-            150000
-          ),
-          schoolKicker: sanitizeString(
-            merged.schoolKicker || DEFAULT_PORTAL_SETTINGS.schoolKicker,
-            120
-          ),
-          portalSubtitle: sanitizeString(
-            merged.portalSubtitle || DEFAULT_PORTAL_SETTINGS.portalSubtitle,
-            140
-          ),
-          welcomeTitle: sanitizeString(
-            merged.welcomeTitle || DEFAULT_PORTAL_SETTINGS.welcomeTitle,
-            120
-          ),
-          mottoText: sanitizeString(merged.mottoText || DEFAULT_PORTAL_SETTINGS.mottoText, 140),
-          welcomeDescription: sanitizeString(
-            merged.welcomeDescription || DEFAULT_PORTAL_SETTINGS.welcomeDescription,
-            600
-          ),
-          directoryKicker: sanitizeString(
-            merged.directoryKicker || DEFAULT_PORTAL_SETTINGS.directoryKicker,
-            120
-          ),
-          directoryTitle: sanitizeString(
-            merged.directoryTitle || DEFAULT_PORTAL_SETTINGS.directoryTitle,
-            140
-          ),
-          directoryDescription: sanitizeString(
-            merged.directoryDescription || DEFAULT_PORTAL_SETTINGS.directoryDescription,
-            500
-          ),
-          facebookUrl: sanitizeString(merged.facebookUrl ?? '', 500),
-          twitterUrl: sanitizeString(merged.twitterUrl ?? '', 500),
-          linkedinUrl: sanitizeString(merged.linkedinUrl ?? '', 500),
-          heroCaptionLocation: sanitizeString(
-            merged.heroCaptionLocation || DEFAULT_PORTAL_SETTINGS.heroCaptionLocation,
-            140
-          ),
-          heroCaptionTitle: sanitizeString(
-            merged.heroCaptionTitle || DEFAULT_PORTAL_SETTINGS.heroCaptionTitle,
-            140
-          ),
-          heroCaptionDescription: sanitizeString(
-            merged.heroCaptionDescription || DEFAULT_PORTAL_SETTINGS.heroCaptionDescription,
-            400
-          ),
-          footerSubtitle: sanitizeString(
-            merged.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle,
-            240
-          ),
-          visibility: 'public' as const,
-          updatedAt: serverTimestamp(),
-        };
+        const payload = buildPortalSettingsPayload(merged, firebaseUser.uid);
 
         if (snap.exists()) {
           await updateDoc(settingsRef, payload);
@@ -929,6 +1227,7 @@ export default function App() {
             createdAt: serverTimestamp(),
           });
         }
+        saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, false);
       } catch (err) {
         console.warn('Saved settings locally; cloud sync error:', err);
       }
@@ -953,7 +1252,7 @@ export default function App() {
     }
     setCloudSyncStatus('syncing');
 
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(updated.uid)) {
       try {
         const ref = doc(db, 'alumni_profiles', updated.uid);
         const snap = await getDoc(ref);
@@ -961,13 +1260,13 @@ export default function App() {
           uid: updated.uid,
           fullName: sanitizeString(updated.fullName, 100),
           graduationYear: Number(updated.graduationYear),
-          formerSection: sanitizeString(updated.formerSection, 60),
+          formerSection: sanitizeString(updated.formerSection || 'Section A', 60),
           strand: updated.strand,
-          course: sanitizeString(updated.course, 120),
-          profession: sanitizeString(updated.profession, 100),
-          currentEmployment: sanitizeString(updated.currentEmployment, 120),
-          locationCity: sanitizeString(updated.locationCity, 100),
-          bio: sanitizeString(updated.bio, 600),
+          course: sanitizeString(updated.course || 'BS General', 120),
+          profession: sanitizeString(updated.profession || 'Alumnus', 100),
+          currentEmployment: sanitizeString(updated.currentEmployment || 'BNHS Chapter', 120),
+          locationCity: sanitizeString(updated.locationCity || 'Barobo, Surigao del Sur', 100),
+          bio: sanitizeString(updated.bio || 'Once a Student, Always an Eagle!', 600),
           mentorshipRole: updated.mentorshipRole || 'none',
           industrySector: sanitizeString(
             updated.industrySector || 'Engineering & Architecture',
@@ -995,13 +1294,14 @@ export default function App() {
 
   // Delete an Alumni Profile from Directory & Cloud
   const handleDeleteAlumnusProfile = async (uid: string, _fullName: string) => {
+    setCloudSyncStatus('syncing');
     setDeletedProfileUids((prev) => ({ ...prev, [uid]: true }));
     setLocalProfileOverrides((prev) => {
       const next = { ...prev };
       delete next[uid];
       return next;
     });
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(uid)) {
       try {
         await deleteDoc(doc(db, 'alumni_profiles', uid));
       } catch (err) {
@@ -1044,12 +1344,12 @@ export default function App() {
     }));
     setCloudSyncStatus('syncing');
 
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(normalizedEvent.id)) {
       try {
         const eventRef = doc(db, 'events', normalizedEvent.id);
         const snap = await getDoc(eventRef);
         const payload = {
-          authorId: snap.exists() ? snap.data().authorId : firebaseUser.uid,
+          authorId: firebaseUser.uid,
           title: sanitizeString(normalizedEvent.title, 140),
           category: normalizedEvent.category,
           eventDate: sanitizeString(normalizedEvent.eventDate, 50),
@@ -1067,7 +1367,6 @@ export default function App() {
         } else {
           await setDoc(eventRef, {
             ...payload,
-            authorId: firebaseUser.uid,
             createdAt: serverTimestamp(),
           });
         }
@@ -1103,13 +1402,14 @@ export default function App() {
 
   // Delete an Event
   const handleDeleteEvent = async (eventId: string, _title: string) => {
+    setCloudSyncStatus('syncing');
     setDeletedEventIds((prev) => ({ ...prev, [eventId]: true }));
     setLocalEventOverrides((prev) => {
       const next = { ...prev };
       delete next[eventId];
       return next;
     });
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(eventId)) {
       try {
         await deleteDoc(doc(db, 'events', eventId));
       } catch (err) {
@@ -1122,6 +1422,7 @@ export default function App() {
 
   // Save or update an Announcement
   const handleSaveAnnouncement = async (annData: AnnouncementRecord, _isNew: boolean) => {
+    setCloudSyncStatus('syncing');
     setDeletedAnnouncementIds((prev) => {
       const next = { ...prev };
       delete next[annData.id];
@@ -1132,12 +1433,12 @@ export default function App() {
       [annData.id]: annData,
     }));
 
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(annData.id)) {
       try {
         const annRef = doc(db, 'announcements', annData.id);
         const snap = await getDoc(annRef);
         const payload = {
-          authorId: snap.exists() ? snap.data().authorId : firebaseUser.uid,
+          authorId: firebaseUser.uid,
           authorName: sanitizeString(annData.authorName, 100),
           title: sanitizeString(annData.title, 150),
           category: annData.category,
@@ -1153,7 +1454,6 @@ export default function App() {
         } else {
           await setDoc(annRef, {
             ...payload,
-            authorId: firebaseUser.uid,
             createdAt: serverTimestamp(),
           });
         }
@@ -1167,13 +1467,14 @@ export default function App() {
 
   // Delete an Announcement
   const handleDeleteAnnouncement = async (annId: string, _title: string) => {
+    setCloudSyncStatus('syncing');
     setDeletedAnnouncementIds((prev) => ({ ...prev, [annId]: true }));
     setLocalAnnouncementOverrides((prev) => {
       const next = { ...prev };
       delete next[annId];
       return next;
     });
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(annId)) {
       try {
         await deleteDoc(doc(db, 'announcements', annId));
       } catch (err) {
@@ -1186,6 +1487,7 @@ export default function App() {
 
   // Save or update a Spotlight Story
   const handleSaveSpotlight = async (storyData: SpotlightStoryRecord, _isNew: boolean) => {
+    setCloudSyncStatus('syncing');
     setDeletedSpotlightIds((prev) => {
       const next = { ...prev };
       delete next[storyData.id];
@@ -1196,12 +1498,12 @@ export default function App() {
       [storyData.id]: storyData,
     }));
 
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(storyData.id)) {
       try {
         const spotRef = doc(db, 'spotlight_nominations', storyData.id);
         const snap = await getDoc(spotRef);
         const payload = {
-          nominatorUid: snap.exists() ? snap.data().nominatorUid : firebaseUser.uid,
+          nominatorUid: firebaseUser.uid,
           nominatorName: sanitizeString(storyData.nominatorName, 100),
           nomineeName: sanitizeString(storyData.nomineeName, 100),
           graduationYear: Number(storyData.graduationYear),
@@ -1218,7 +1520,6 @@ export default function App() {
         } else {
           await setDoc(spotRef, {
             ...payload,
-            nominatorUid: firebaseUser.uid,
             createdAt: serverTimestamp(),
           });
         }
@@ -1232,13 +1533,14 @@ export default function App() {
 
   // Delete a Spotlight Story
   const handleDeleteSpotlight = async (storyId: string, _nomineeName: string) => {
+    setCloudSyncStatus('syncing');
     setDeletedSpotlightIds((prev) => ({ ...prev, [storyId]: true }));
     setLocalSpotlightOverrides((prev) => {
       const next = { ...prev };
       delete next[storyId];
       return next;
     });
-    if (firebaseUser) {
+    if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(storyId)) {
       try {
         await deleteDoc(doc(db, 'spotlight_nominations', storyId));
       } catch (err) {
@@ -1318,19 +1620,23 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Zone 3: Auto-Sync + Alumni Login / Dashboard Action */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Zone 3: Cloud Synced (Auto-Saved) + Alumni Login / Dashboard Action */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handleManualCloudSync}
-              title={`Auto-Sync Active (${lastSyncedTime}) — Automatically saves all changes`}
-              className="px-2.5 py-2 rounded-lg bg-[#650019] border border-[#D4AF37]/40 text-[11px] font-semibold text-[#D4AF37] hover:bg-black/30 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+              title={`Cloud Synced (Auto-Saved) · Last saved ${lastSyncedTime} — Click to verify & sync all changes`}
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg bg-[#650019] border border-emerald-400/50 text-[10px] sm:text-[11px] font-bold text-emerald-200 hover:bg-black/30 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-sm"
             >
-              <Cloud className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">
+              {cloudSyncStatus === 'syncing' ? (
+                <Cloud className="w-3.5 h-3.5 text-[#D4AF37] animate-pulse shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              )}
+              <span>
                 {cloudSyncStatus === 'syncing'
-                  ? 'Auto-Syncing...'
-                  : `Auto-Synced · ${lastSyncedTime}`}
+                  ? 'Cloud Syncing (Auto-Saving)...'
+                  : 'Cloud Synced (Auto-Saved)'}
               </span>
             </button>
 
@@ -2228,8 +2534,24 @@ export default function App() {
             </div>
           </div>
 
-          {/* Centered Developer Attribution Bar & Button */}
-          <div className="pt-6 border-t border-white/15 flex flex-col items-center justify-center text-center gap-2">
+          {/* Centered Cloud Synced (Auto-Saved) Badge & Developer Attribution Bar */}
+          <div className="pt-6 border-t border-white/15 flex flex-col items-center justify-center text-center gap-3">
+            <button
+              type="button"
+              onClick={handleManualCloudSync}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-400/40 text-emerald-200 hover:bg-emerald-900/60 transition-colors text-[11px] font-semibold cursor-pointer"
+            >
+              {cloudSyncStatus === 'syncing' ? (
+                <Cloud className="w-3.5 h-3.5 text-[#D4AF37] animate-pulse" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              )}
+              <span>
+                {cloudSyncStatus === 'syncing'
+                  ? 'Cloud Syncing (Auto-Saving)...'
+                  : `Cloud Synced (Auto-Saved) · ${lastSyncedTime}`}
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
