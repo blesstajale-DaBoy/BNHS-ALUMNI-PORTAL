@@ -399,7 +399,11 @@
           "type": "string",
           "minLength": 0,
           "maxLength": 150000,
-          "description": "Uploaded event photo data URI or Google/web image link."
+          "description": "Uploaded primary event photo data URI or Google/web image link."
+        },
+        "galleryUrls": {
+          "type": "array",
+          "description": "Ordered array of sliding event photo URLs or compressed data URIs (up to 10)."
         },
         "status": {
           "type": "string",

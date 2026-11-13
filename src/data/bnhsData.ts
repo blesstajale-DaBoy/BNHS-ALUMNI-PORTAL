@@ -98,6 +98,7 @@ export interface AlumniEventRecord {
   status: 'upcoming' | 'ongoing' | 'completed' | 'archived';
   visibility: 'public';
   imageUrl?: string;
+  galleryUrls?: string[];
 }
 
 export interface EventRsvpRecord {
@@ -494,6 +495,11 @@ export const INITIAL_EVENTS: AlumniEventRecord[] = [
     status: 'upcoming',
     visibility: 'public',
     imageUrl: BNHS_ASSETS.homecomingEvent,
+    galleryUrls: [
+      BNHS_ASSETS.homecomingEvent,
+      BNHS_ASSETS.campusHero,
+      BNHS_ASSETS.mentorshipEvent,
+    ],
   },
   {
     id: 'event_eagle_career_summit_2026',
@@ -507,6 +513,11 @@ export const INITIAL_EVENTS: AlumniEventRecord[] = [
     status: 'upcoming',
     visibility: 'public',
     imageUrl: BNHS_ASSETS.mentorshipEvent,
+    galleryUrls: [
+      BNHS_ASSETS.mentorshipEvent,
+      BNHS_ASSETS.campusHero,
+      BNHS_ASSETS.homecomingEvent,
+    ],
   },
   {
     id: 'event_silver_jubilarian_2002',
@@ -520,6 +531,11 @@ export const INITIAL_EVENTS: AlumniEventRecord[] = [
     status: 'upcoming',
     visibility: 'public',
     imageUrl: BNHS_ASSETS.campusHero,
+    galleryUrls: [
+      BNHS_ASSETS.campusHero,
+      BNHS_ASSETS.homecomingEvent,
+      BNHS_ASSETS.mentorshipEvent,
+    ],
   },
   {
     id: 'event_scholarship_drive_2026',
@@ -533,6 +549,11 @@ export const INITIAL_EVENTS: AlumniEventRecord[] = [
     status: 'ongoing',
     visibility: 'public',
     imageUrl: BNHS_ASSETS.mentorshipEvent,
+    galleryUrls: [
+      BNHS_ASSETS.mentorshipEvent,
+      BNHS_ASSETS.homecomingEvent,
+      BNHS_ASSETS.campusHero,
+    ],
   },
   {
     id: 'event_coastal_outreach_2027',
@@ -546,6 +567,11 @@ export const INITIAL_EVENTS: AlumniEventRecord[] = [
     status: 'upcoming',
     visibility: 'public',
     imageUrl: BNHS_ASSETS.campusHero,
+    galleryUrls: [
+      BNHS_ASSETS.campusHero,
+      BNHS_ASSETS.mentorshipEvent,
+      BNHS_ASSETS.homecomingEvent,
+    ],
   },
 ];
 

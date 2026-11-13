@@ -1,58 +1,28 @@
 import React, { useState } from 'react';
-import { User } from 'firebase/auth';
 import {
   Award,
   ChevronLeft,
   ChevronRight,
   UserPlus,
-  X,
-  CheckCircle2,
   Edit3,
   Trash2,
-  Save,
 } from 'lucide-react';
-import {
-  ALLOWED_STRANDS,
-  AlumniStrand,
-  getCurrentMaxGraduationYear,
-  sanitizeId,
-  sanitizeString,
-} from '../lib/firebase';
-import { AlumniProfileRecord, SpotlightStoryRecord } from '../data/bnhsData';
+import { SpotlightStoryRecord } from '../data/bnhsData';
 
 interface AlumniSpotlightCarouselProps {
   stories: SpotlightStoryRecord[];
-  currentUser: User | null;
-  userProfile: AlumniProfileRecord | null;
-  onSignIn: () => Promise<void>;
-  onSaveSpotlight: (storyData: SpotlightStoryRecord, isNew: boolean) => Promise<void>;
-  onDeleteSpotlight: (storyId: string, nomineeName: string) => Promise<void>;
   onSelectBatchYear?: (year: number) => void;
+  onOpenEditMenu: (tab: 'spotlights', itemId?: string | null) => void;
+  onOpenDeleteMenu: (tab: 'spotlights', itemId?: string | null) => void;
 }
 
 export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = ({
   stories,
-  currentUser,
-  userProfile,
-  onSaveSpotlight,
-  onDeleteSpotlight,
   onSelectBatchYear,
+  onOpenEditMenu,
+  onOpenDeleteMenu,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showNominateModal, setShowNominateModal] = useState(false);
-  const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
-
-  // Nomination / Edit Form State
-  const maxYear = getCurrentMaxGraduationYear();
-  const [nomineeName, setNomineeName] = useState('');
-  const [graduationYear, setGraduationYear] = useState<number>(maxYear - 5);
-  const [strand, setStrand] = useState<AlumniStrand>('STEM');
-  const [profession, setProfession] = useState('');
-  const [milestoneTitle, setMilestoneTitle] = useState('');
-  const [story, setStory] = useState('');
-  const [nominatorName, setNominatorName] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [nominationSuccess, setNominationSuccess] = useState<string | null>(null);
 
   const safeStories = stories.length > 0 ? stories : [];
   const safeIndex = safeStories.length > 0 ? currentIndex % safeStories.length : 0;
@@ -66,109 +36,6 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
   const handleNext = () => {
     if (safeStories.length === 0) return;
     setCurrentIndex((prev) => (prev + 1) % safeStories.length);
-  };
-
-  const yearsList = Array.from({ length: maxYear - 1982 + 1 }, (_, i) => maxYear - i);
-
-  const openAddSpotlightModal = () => {
-    setNominationSuccess(null);
-    setEditingStoryId(null);
-    setNomineeName('');
-    setGraduationYear(maxYear - 5);
-    setStrand('STEM');
-    setProfession('');
-    setMilestoneTitle('');
-    setStory('');
-    setNominatorName(
-      userProfile?.fullName || currentUser?.displayName || 'BNHS Alumni Federation'
-    );
-    setShowNominateModal(true);
-  };
-
-  const openEditSpotlightModal = (st: SpotlightStoryRecord) => {
-    setNominationSuccess(null);
-    setEditingStoryId(st.id);
-    setNomineeName(st.nomineeName || '');
-    setGraduationYear(st.graduationYear || maxYear - 5);
-    setStrand(st.strand || 'STEM');
-    setProfession(st.profession || '');
-    setMilestoneTitle(st.milestoneTitle || '');
-    setStory(st.story || '');
-    setNominatorName(st.nominatorName || 'BNHS Alumni Federation');
-    setShowNominateModal(true);
-  };
-
-  const handleDeleteSpotlightClick = async (st: SpotlightStoryRecord) => {
-    await onDeleteSpotlight(st.id, st.nomineeName);
-    if (editingStoryId === st.id) {
-      setShowNominateModal(false);
-      setEditingStoryId(null);
-    }
-    setCurrentIndex(0);
-    setNominationSuccess(
-      `Deleted spotlight milestone for ${st.nomineeName} (Batch ${st.graduationYear}).`
-    );
-  };
-
-  const handleSubmitNomination = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const cleanNominee = sanitizeString(nomineeName, 100);
-    const cleanProfession = sanitizeString(profession, 100);
-    const cleanMilestone = sanitizeString(milestoneTitle, 140);
-    const cleanStory = sanitizeString(story, 800);
-    const cleanNominator = sanitizeString(
-      nominatorName ||
-        userProfile?.fullName ||
-        currentUser?.displayName ||
-        'BNHS Alumni Federation',
-      100
-    );
-
-    if (
-      cleanNominee.length < 2 ||
-      cleanProfession.length < 2 ||
-      cleanMilestone.length < 5 ||
-      cleanStory.length < 15
-    ) {
-      return;
-    }
-
-    setSubmitting(true);
-    const isNew = !editingStoryId;
-    const nomId = editingStoryId || sanitizeId(`spot_${Date.now()}`);
-    const storyRecord: SpotlightStoryRecord = {
-      id: nomId,
-      nominatorUid: currentUser?.uid || 'system_bnhs_admin',
-      nominatorName: cleanNominator,
-      nomineeName: cleanNominee,
-      graduationYear: Number(graduationYear),
-      strand,
-      profession: cleanProfession,
-      milestoneTitle: cleanMilestone,
-      story: cleanStory,
-      visibility: 'public',
-    };
-
-    try {
-      await onSaveSpotlight(storyRecord, isNew);
-      setShowNominateModal(false);
-      setEditingStoryId(null);
-      setNomineeName('');
-      setProfession('');
-      setMilestoneTitle('');
-      setStory('');
-      if (isNew) {
-        setCurrentIndex(0);
-      }
-      setNominationSuccess(
-        isNew
-          ? `Added! Your Alumni Spotlight feature for ${cleanNominee} (Batch ${graduationYear}) is now live in the carousel.`
-          : `Updated Alumni Spotlight milestone for ${cleanNominee} (Batch ${graduationYear}).`
-      );
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   const initials = activeStory
@@ -199,7 +66,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
             type="button"
-            onClick={openAddSpotlightModal}
+            onClick={() => onOpenEditMenu('spotlights', 'NEW')}
             className="px-4 py-2.5 rounded-lg bg-[#D4AF37] text-[#450012] font-bold text-xs sm:text-sm hover:bg-[#e3c14d] transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <UserPlus className="w-4 h-4" />
@@ -209,7 +76,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
             <>
               <button
                 type="button"
-                onClick={() => openEditSpotlightModal(activeStory)}
+                onClick={() => onOpenEditMenu('spotlights', activeStory.id)}
                 className="px-3.5 py-2.5 rounded-lg bg-[#650019] border border-[#D4AF37]/50 text-[#D4AF37] font-bold text-xs sm:text-sm hover:bg-black/30 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Edit3 className="w-4 h-4" />
@@ -217,7 +84,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
               </button>
               <button
                 type="button"
-                onClick={() => handleDeleteSpotlightClick(activeStory)}
+                onClick={() => onOpenDeleteMenu('spotlights', activeStory.id)}
                 className="px-3.5 py-2.5 rounded-lg bg-red-700/90 border border-red-400/50 text-white font-bold text-xs sm:text-sm hover:bg-red-800 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
@@ -227,22 +94,6 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
           )}
         </div>
       </div>
-
-      {nominationSuccess && (
-        <div className="mt-5 p-4 rounded-lg bg-[#650019] border border-[#D4AF37] text-white text-sm flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-[#D4AF37] shrink-0" />
-            <span>{nominationSuccess}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setNominationSuccess(null)}
-            className="text-xs text-[#D4AF37] hover:underline shrink-0 cursor-pointer"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
 
       {/* Main White Spotlight Carousel Card */}
       {!activeStory ? (
@@ -255,7 +106,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
           </p>
           <button
             type="button"
-            onClick={openAddSpotlightModal}
+            onClick={() => onOpenEditMenu('spotlights', 'NEW')}
             className="px-4 py-2 rounded-lg bg-[#650019] text-white text-xs font-semibold hover:bg-[#450012] cursor-pointer"
           >
             Add First Spotlight Story
@@ -264,7 +115,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
       ) : (
         <div className="mt-6 bg-white text-gray-900 rounded-xl p-5 sm:p-8 border border-gray-200">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
-            {/* Left 4 Columns: Alumnus Crest Avatar & Batch Details */}
+            {/* Left 4 Columns */}
             <div className="lg:col-span-4 flex flex-col justify-between bg-[#650019] text-white rounded-xl p-5 sm:p-6 border border-[#D4AF37]/40 h-full">
               <div>
                 <div className="flex items-center justify-between gap-3 mb-5">
@@ -274,7 +125,6 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
                   <Award className="w-7 h-7 text-[#D4AF37] shrink-0" />
                 </div>
 
-                {/* Clean unboxed metadata per Zero-Pill Discipline */}
                 <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-[#D4AF37]">
                   <span className="font-mono-num">CLASS OF {activeStory.graduationYear}</span>
                   <span aria-hidden="true">·</span>
@@ -303,7 +153,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
               </div>
             </div>
 
-            {/* Right 8 Columns: Milestone Headline, Story Narrative & Carousel Controls */}
+            {/* Right 8 Columns */}
             <div className="lg:col-span-8 flex flex-col justify-between h-full">
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#650019] font-bold uppercase tracking-wider mb-2">
@@ -315,7 +165,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
                     </span>
                     <button
                       type="button"
-                      onClick={() => openEditSpotlightModal(activeStory)}
+                      onClick={() => onOpenEditMenu('spotlights', activeStory.id)}
                       className="px-2.5 py-1 rounded border border-[#650019]/30 text-[#650019] hover:bg-[#650019] hover:text-white transition-colors normal-case inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Edit3 className="w-3 h-3" />
@@ -323,7 +173,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteSpotlightClick(activeStory)}
+                      onClick={() => onOpenDeleteMenu('spotlights', activeStory.id)}
                       className="px-2.5 py-1 rounded border border-red-200 text-red-700 hover:bg-red-600 hover:text-white transition-colors normal-case inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -341,9 +191,7 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
                 </blockquote>
               </div>
 
-              {/* Carousel Controls */}
               <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
-                {/* Slide Selector Buttons */}
                 <div className="flex items-center gap-2">
                   {safeStories.map((st, idx) => (
                     <button
@@ -385,200 +233,6 @@ export const AlumniSpotlightCarousel: React.FC<AlumniSpotlightCarouselProps> = (
           </div>
         </div>
       )}
-
-      {/* Add / Edit Spotlight Modal */}
-      {showNominateModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 overflow-y-auto"
-          onClick={() => setShowNominateModal(false)}
-        >
-          <div
-            className="bg-white text-gray-900 rounded-xl max-w-lg w-full overflow-hidden border border-[#D4AF37]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-[#450012] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/30">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold">
-                  BNHS Alumni Honor Roll
-                </p>
-                <h3 className="font-display text-xl font-bold mt-0.5">
-                  {editingStoryId
-                    ? 'Edit Alumni Spotlight & Milestone'
-                    : 'Add / Nominate an Alumnus for Spotlight'}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowNominateModal(false)}
-                aria-label="Close nomination modal"
-                className="text-white/70 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitNomination} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Nominee Full Name (2–100 chars) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={2}
-                  maxLength={100}
-                  value={nomineeName ?? ''}
-                  onChange={(e) => setNomineeName(e.target.value)}
-                  placeholder="e.g., Engr. Maria Clara D. Santos"
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Graduation Year (1982–{maxYear}) *
-                  </label>
-                  <select
-                    value={graduationYear ?? maxYear - 5}
-                    onChange={(e) => setGraduationYear(Number(e.target.value))}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm font-mono-num"
-                  >
-                    {yearsList.map((yr) => (
-                      <option key={yr} value={yr}>
-                        Batch {yr}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Strand / Curriculum *
-                  </label>
-                  <select
-                    value={strand ?? 'STEM'}
-                    onChange={(e) => setStrand(e.target.value as AlumniStrand)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    {ALLOWED_STRANDS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Current Profession & Organization *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={2}
-                    maxLength={100}
-                    value={profession ?? ''}
-                    onChange={(e) => setProfession(e.target.value)}
-                    placeholder="e.g., Chief Agricultural Scientist · PhilRice"
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Nominated By (Chapter / Name) *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={2}
-                    maxLength={100}
-                    value={nominatorName ?? ''}
-                    onChange={(e) => setNominatorName(e.target.value)}
-                    placeholder="e.g., BNHS Alumni Federation"
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Career Milestone Headline (5–140 chars) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={5}
-                  maxLength={140}
-                  value={milestoneTitle ?? ''}
-                  onChange={(e) => setMilestoneTitle(e.target.value)}
-                  placeholder="e.g., Developed Drought-Tolerant Rice Varieties for Caraga Farmers"
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Success Story / Impact Summary (15–800 chars) *
-                </label>
-                <textarea
-                  rows={4}
-                  required
-                  minLength={15}
-                  maxLength={800}
-                  value={story ?? ''}
-                  onChange={(e) => setStory(e.target.value)}
-                  placeholder="Share how this BNHS alumnus achieved this milestone and how their work uplifts their profession or community..."
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
-                {editingStoryId ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const target = safeStories.find((s) => s.id === editingStoryId);
-                      if (target) handleDeleteSpotlightClick(target);
-                    }}
-                    className="px-4 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-bold hover:bg-red-600 hover:text-white transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Delete Story
-                  </button>
-                ) : (
-                  <div />
-                )}
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowNominateModal(false)}
-                    className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="px-5 py-2 rounded-lg bg-[#650019] text-white text-xs font-semibold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5 text-[#D4AF37]" />
-                    {submitting
-                      ? 'Saving...'
-                      : editingStoryId
-                      ? 'Save Spotlight Changes'
-                      : 'Submit Spotlight Feature'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
-

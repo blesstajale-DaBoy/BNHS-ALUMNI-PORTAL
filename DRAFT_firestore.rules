@@ -131,7 +131,7 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'authorId', 'title', 'category', 'eventDate', 'venue',
-          'description', 'imageUrl', 'status', 'visibility', 'createdAt', 'updatedAt'
+          'description', 'imageUrl', 'galleryUrls', 'status', 'visibility', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.authorId) &&
         data.authorId == request.auth.uid &&
@@ -142,6 +142,11 @@ service cloud.firestore {
         data.venue is string && data.venue.size() >= 3 && data.venue.size() <= 140 &&
         data.description is string && data.description.size() >= 10 && data.description.size() <= 1000 &&
         data.imageUrl is string && data.imageUrl.size() >= 0 && data.imageUrl.size() <= 150000 &&
+        (!('galleryUrls' in data) || (
+          data.galleryUrls is list &&
+          data.galleryUrls.size() <= 10 &&
+          (data.galleryUrls.size() == 0 || (data.galleryUrls[0] is string && data.galleryUrls[0].size() <= 150000))
+        )) &&
         data.status is string && data.status.size() >= 7 && data.status.size() <= 10 &&
         data.status in ['upcoming', 'ongoing', 'completed', 'archived'] &&
         data.visibility is string && data.visibility.size() == 6 && data.visibility == 'public' &&
@@ -308,7 +313,7 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           (isVerifiedUser() && existing().status != 'archived' &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'authorId', 'title', 'category', 'eventDate', 'venue', 'description', 'imageUrl', 'status', 'updatedAt'
+              'authorId', 'title', 'category', 'eventDate', 'venue', 'description', 'imageUrl', 'galleryUrls', 'status', 'updatedAt'
             ])) ||
           isAdmin()
         );

@@ -26,10 +26,6 @@ import {
   UserPlus,
   Briefcase,
   MapPin,
-  Settings,
-  Upload,
-  Link2,
-  Save,
   X,
   CheckCircle2,
   Facebook,
@@ -38,14 +34,13 @@ import {
   Cloud,
   Edit3,
   LogIn,
+  Trash2,
 } from 'lucide-react';
 import {
   auth,
   db,
-  fileToCompressedDataUrl,
   handleFirestoreError,
   logOutUser,
-  normalizeImageUrl,
   OperationType,
   sanitizeId,
   sanitizeString,
@@ -73,6 +68,9 @@ import { EventsAndAnnouncementsModule } from './components/EventsAndAnnouncement
 import { AlumniDashboardModule } from './components/AlumniDashboardModule';
 import { AlumniInsightsSection } from './components/AlumniInsightsSection';
 import { AlumniSpotlightCarousel } from './components/AlumniSpotlightCarousel';
+import { EventSlidingGallery } from './components/EventSlidingGallery';
+import { EditMenuTab, PortalEditMenuModal } from './components/PortalEditMenuModal';
+import { DeleteMenuTab, PortalDeleteMenuModal } from './components/PortalDeleteMenuModal';
 
 type PortalTab = 'home' | 'directory' | 'register' | 'events' | 'announcements' | 'dashboard';
 
@@ -86,6 +84,7 @@ const STORAGE_KEYS = {
   deletedAnnouncements: 'bnhs_deleted_announcements_v2',
   spotlights: 'bnhs_local_spotlights_v2',
   deletedSpotlights: 'bnhs_deleted_spotlights_v2',
+  rsvps: 'bnhs_local_rsvps_v2',
   directUser: 'bnhs_direct_portal_user_v2',
 };
 
@@ -199,52 +198,26 @@ export default function App() {
     };
   });
 
-  // Admin Hero / Branding Editor Modal State
-  const [showAdminHeroModal, setShowAdminHeroModal] = useState(false);
-  const [editLogoUrl, setEditLogoUrl] = useState(DEFAULT_PORTAL_SETTINGS.logoUrl);
-  const [editLogoMode, setEditLogoMode] = useState<'local' | 'link'>('local');
-  const [editLogoLink, setEditLogoLink] = useState('');
-  const [editLogoAnimated, setEditLogoAnimated] = useState(true);
-  const [editHeroImageUrl, setEditHeroImageUrl] = useState(DEFAULT_PORTAL_SETTINGS.heroImageUrl);
-  const [editHeroMode, setEditHeroMode] = useState<'local' | 'link'>('local');
-  const [editHeroLink, setEditHeroLink] = useState('');
-  const [editSchoolKicker, setEditSchoolKicker] = useState(DEFAULT_PORTAL_SETTINGS.schoolKicker);
-  const [editPortalSubtitle, setEditPortalSubtitle] = useState(
-    DEFAULT_PORTAL_SETTINGS.portalSubtitle
-  );
-  const [editWelcomeTitle, setEditWelcomeTitle] = useState(DEFAULT_PORTAL_SETTINGS.welcomeTitle);
-  const [editMottoText, setEditMottoText] = useState(DEFAULT_PORTAL_SETTINGS.mottoText);
-  const [editWelcomeDesc, setEditWelcomeDesc] = useState(
-    DEFAULT_PORTAL_SETTINGS.welcomeDescription
-  );
-  const [editFacebookUrl, setEditFacebookUrl] = useState(DEFAULT_PORTAL_SETTINGS.facebookUrl);
-  const [editTwitterUrl, setEditTwitterUrl] = useState(DEFAULT_PORTAL_SETTINGS.twitterUrl);
-  const [editLinkedinUrl, setEditLinkedinUrl] = useState(DEFAULT_PORTAL_SETTINGS.linkedinUrl);
-  const [editHeroCaptionLocation, setEditHeroCaptionLocation] = useState(
-    DEFAULT_PORTAL_SETTINGS.heroCaptionLocation
-  );
-  const [editHeroCaptionTitle, setEditHeroCaptionTitle] = useState(
-    DEFAULT_PORTAL_SETTINGS.heroCaptionTitle
-  );
-  const [editHeroCaptionDescription, setEditHeroCaptionDescription] = useState(
-    DEFAULT_PORTAL_SETTINGS.heroCaptionDescription
-  );
-  const [editFooterSubtitle, setEditFooterSubtitle] = useState(
-    DEFAULT_PORTAL_SETTINGS.footerSubtitle
-  );
-  const [savingHeroSettings, setSavingHeroSettings] = useState(false);
-  const [adminToast, setAdminToast] = useState<string | null>(null);
+  // Unified Edit Menu & Unified Delete Menu Modal State
+  const [editMenuState, setEditMenuState] = useState<{
+    isOpen: boolean;
+    tab: EditMenuTab;
+    itemId: string | null;
+  }>({ isOpen: false, tab: 'branding', itemId: null });
 
-  // Dedicated Hero Caption Edit Modal State
-  const [showHeroCaptionModal, setShowHeroCaptionModal] = useState(false);
-  // Dedicated Footer Subtitle Edit Modal State
-  const [showFooterEditModal, setShowFooterEditModal] = useState(false);
+  const [deleteMenuState, setDeleteMenuState] = useState<{
+    isOpen: boolean;
+    tab: DeleteMenuTab;
+    focusId: string | null;
+  }>({ isOpen: false, tab: 'directory', focusId: null });
+
+  const [adminToast, setAdminToast] = useState<string | null>(null);
 
   // Online Alumni Registration Modal State
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
 
-  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
-  const heroFileInputRef = useRef<HTMLInputElement | null>(null);
+  // Track if first mount already hydrated so Auto-Sync triggers cleanly on changes
+  const autoSyncMountedRef = useRef(false);
 
   // Firestore & Local Persisted Collections
   const [firestoreProfiles, setFirestoreProfiles] = useState<AlumniProfileRecord[]>([]);
@@ -282,7 +255,9 @@ export default function App() {
     loadJsonFromStorage(STORAGE_KEYS.deletedSpotlights, {})
   );
 
-  const [myRsvps, setMyRsvps] = useState<Record<string, EventRsvpRecord>>({});
+  const [myRsvps, setMyRsvps] = useState<Record<string, EventRsvpRecord>>(() =>
+    loadJsonFromStorage(STORAGE_KEYS.rsvps, {})
+  );
 
   // Persist local overrides & deletions to localStorage automatically
   useEffect(() => {
@@ -324,6 +299,49 @@ export default function App() {
   useEffect(() => {
     saveJsonToStorage(STORAGE_KEYS.directUser, directUser);
   }, [directUser]);
+
+  useEffect(() => {
+    saveJsonToStorage(STORAGE_KEYS.rsvps, myRsvps);
+  }, [myRsvps]);
+
+  // Real-time Debounced Auto-Sync (saves all portal changes automatically)
+  useEffect(() => {
+    if (!autoSyncMountedRef.current) {
+      autoSyncMountedRef.current = true;
+      return;
+    }
+    setCloudSyncStatus('syncing');
+    const timer = window.setTimeout(() => {
+      saveJsonToStorage(STORAGE_KEYS.settings, portalSettings);
+      saveJsonToStorage(STORAGE_KEYS.profiles, localProfileOverrides);
+      saveJsonToStorage(STORAGE_KEYS.deletedProfiles, deletedProfileUids);
+      saveJsonToStorage(STORAGE_KEYS.events, localEventOverrides);
+      saveJsonToStorage(STORAGE_KEYS.deletedEvents, deletedEventIds);
+      saveJsonToStorage(STORAGE_KEYS.announcements, localAnnouncementOverrides);
+      saveJsonToStorage(STORAGE_KEYS.deletedAnnouncements, deletedAnnouncementIds);
+      saveJsonToStorage(STORAGE_KEYS.spotlights, localSpotlightOverrides);
+      saveJsonToStorage(STORAGE_KEYS.deletedSpotlights, deletedSpotlightIds);
+      saveJsonToStorage(STORAGE_KEYS.rsvps, myRsvps);
+
+      setCloudSyncStatus('synced');
+      setLastSyncedTime(
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      );
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    portalSettings,
+    localProfileOverrides,
+    deletedProfileUids,
+    localEventOverrides,
+    deletedEventIds,
+    localAnnouncementOverrides,
+    deletedAnnouncementIds,
+    localSpotlightOverrides,
+    deletedSpotlightIds,
+    myRsvps,
+  ]);
 
   // Track Firebase Auth State
   useEffect(() => {
@@ -437,6 +455,9 @@ export default function App() {
         const rows: AlumniEventRecord[] = [];
         snap.forEach((docSnap) => {
           const d = docSnap.data();
+          const gallery = Array.isArray(d.galleryUrls)
+            ? d.galleryUrls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+            : undefined;
           rows.push({
             id: docSnap.id,
             authorId: d.authorId || 'system_bnhs_admin',
@@ -445,7 +466,8 @@ export default function App() {
             eventDate: d.eventDate || '',
             venue: d.venue || '',
             description: d.description || '',
-            imageUrl: d.imageUrl || '',
+            imageUrl: d.imageUrl || (gallery && gallery[0]) || '',
+            galleryUrls: gallery,
             status: d.status || 'upcoming',
             visibility: 'public',
           });
@@ -635,9 +657,14 @@ export default function App() {
     firestoreEvents.forEach((ev) => {
       if (!deletedEventIds[ev.id]) {
         const existing = map.get(ev.id);
+        const mergedGallery =
+          ev.galleryUrls && ev.galleryUrls.length > 0
+            ? ev.galleryUrls
+            : existing?.galleryUrls;
         map.set(ev.id, {
           ...ev,
           imageUrl: ev.imageUrl || existing?.imageUrl || BNHS_ASSETS.homecomingEvent,
+          galleryUrls: mergedGallery,
         });
       }
     });
@@ -795,9 +822,14 @@ export default function App() {
     setCloudSyncStatus('syncing');
     saveJsonToStorage(STORAGE_KEYS.settings, portalSettings);
     saveJsonToStorage(STORAGE_KEYS.profiles, localProfileOverrides);
+    saveJsonToStorage(STORAGE_KEYS.deletedProfiles, deletedProfileUids);
     saveJsonToStorage(STORAGE_KEYS.events, localEventOverrides);
+    saveJsonToStorage(STORAGE_KEYS.deletedEvents, deletedEventIds);
     saveJsonToStorage(STORAGE_KEYS.announcements, localAnnouncementOverrides);
+    saveJsonToStorage(STORAGE_KEYS.deletedAnnouncements, deletedAnnouncementIds);
     saveJsonToStorage(STORAGE_KEYS.spotlights, localSpotlightOverrides);
+    saveJsonToStorage(STORAGE_KEYS.deletedSpotlights, deletedSpotlightIds);
+    saveJsonToStorage(STORAGE_KEYS.rsvps, myRsvps);
 
     if (firebaseUser) {
       try {
@@ -810,7 +842,7 @@ export default function App() {
     setCloudSyncStatus('synced');
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setLastSyncedTime(nowStr);
-    setAdminToast(`Cloud Sync Complete (${nowStr}) — All portal changes are saved.`);
+    setAdminToast(`Auto-Sync Verified (${nowStr}) — All portal edits, photos, and deletions are saved.`);
   };
 
   // Persist Portal Settings (Logo, Hero Picture, Welcome Text, Directory Header, Hero Caption, Footer Subtitle)
@@ -980,34 +1012,52 @@ export default function App() {
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
-  // Save or update an Event & its uploaded photo
+  // Save or update an Event & its sliding photo gallery
   const handleSaveEvent = async (eventData: AlumniEventRecord, _isNew: boolean) => {
+    const cleanSlides = Array.from(
+      new Set([
+        ...(eventData.galleryUrls || []),
+        ...(eventData.imageUrl ? [eventData.imageUrl] : []),
+      ])
+    )
+      .filter((u) => typeof u === 'string' && u.trim().length > 0)
+      .slice(0, 10)
+      .map((u) => sanitizeString(u, 150000));
+
+    const primaryImg =
+      cleanSlides[0] || sanitizeString(eventData.imageUrl || BNHS_ASSETS.homecomingEvent, 150000);
+
+    const normalizedEvent: AlumniEventRecord = {
+      ...eventData,
+      imageUrl: primaryImg,
+      galleryUrls: cleanSlides.length > 0 ? cleanSlides : [primaryImg],
+    };
+
     setDeletedEventIds((prev) => {
       const next = { ...prev };
-      delete next[eventData.id];
+      delete next[normalizedEvent.id];
       return next;
     });
     setLocalEventOverrides((prev) => ({
       ...prev,
-      [eventData.id]: eventData,
+      [normalizedEvent.id]: normalizedEvent,
     }));
+    setCloudSyncStatus('syncing');
 
     if (firebaseUser) {
       try {
-        const eventRef = doc(db, 'events', eventData.id);
+        const eventRef = doc(db, 'events', normalizedEvent.id);
         const snap = await getDoc(eventRef);
         const payload = {
           authorId: snap.exists() ? snap.data().authorId : firebaseUser.uid,
-          title: sanitizeString(eventData.title, 140),
-          category: eventData.category,
-          eventDate: sanitizeString(eventData.eventDate, 50),
-          venue: sanitizeString(eventData.venue, 140),
-          description: sanitizeString(eventData.description, 1000),
-          imageUrl: sanitizeString(
-            eventData.imageUrl || BNHS_ASSETS.homecomingEvent,
-            150000
-          ),
-          status: eventData.status,
+          title: sanitizeString(normalizedEvent.title, 140),
+          category: normalizedEvent.category,
+          eventDate: sanitizeString(normalizedEvent.eventDate, 50),
+          venue: sanitizeString(normalizedEvent.venue, 140),
+          description: sanitizeString(normalizedEvent.description, 1000),
+          imageUrl: primaryImg,
+          galleryUrls: normalizedEvent.galleryUrls || [primaryImg],
+          status: normalizedEvent.status,
           visibility: 'public' as const,
           updatedAt: serverTimestamp(),
         };
@@ -1027,6 +1077,28 @@ export default function App() {
     }
     setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  };
+
+  // Delete an individual slide from an Event's sliding photo gallery
+  const handleDeleteEventSlide = async (eventId: string, slideIndex: number) => {
+    const targetEv = combinedEvents.find((ev) => ev.id === eventId);
+    if (!targetEv) return;
+    const slides = Array.from(
+      new Set([
+        ...(targetEv.galleryUrls || []),
+        ...(targetEv.imageUrl ? [targetEv.imageUrl] : []),
+      ])
+    ).filter(Boolean);
+    const remaining = slides.filter((_, idx) => idx !== slideIndex);
+    const nextSlides = remaining.length > 0 ? remaining : [BNHS_ASSETS.homecomingEvent];
+    await handleSaveEvent(
+      {
+        ...targetEv,
+        imageUrl: nextSlides[0],
+        galleryUrls: nextSlides,
+      },
+      false
+    );
   };
 
   // Delete an Event
@@ -1177,168 +1249,12 @@ export default function App() {
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
-  const openAdminHeroEditor = () => {
-    setEditLogoUrl(portalSettings.logoUrl || DEFAULT_PORTAL_SETTINGS.logoUrl);
-    setEditLogoLink(
-      portalSettings.logoUrl && portalSettings.logoUrl.startsWith('http')
-        ? portalSettings.logoUrl
-        : ''
-    );
-    setEditLogoAnimated(Boolean(portalSettings.logoAnimated));
-    setEditHeroImageUrl(portalSettings.heroImageUrl || DEFAULT_PORTAL_SETTINGS.heroImageUrl);
-    setEditHeroLink(
-      portalSettings.heroImageUrl && portalSettings.heroImageUrl.startsWith('http')
-        ? portalSettings.heroImageUrl
-        : ''
-    );
-    setEditSchoolKicker(portalSettings.schoolKicker || '');
-    setEditPortalSubtitle(portalSettings.portalSubtitle || '');
-    setEditWelcomeTitle(portalSettings.welcomeTitle || '');
-    setEditMottoText(portalSettings.mottoText || '');
-    setEditWelcomeDesc(portalSettings.welcomeDescription || '');
-    setEditFacebookUrl(portalSettings.facebookUrl || '');
-    setEditTwitterUrl(portalSettings.twitterUrl || '');
-    setEditLinkedinUrl(portalSettings.linkedinUrl || '');
-    setEditHeroCaptionLocation(
-      portalSettings.heroCaptionLocation || DEFAULT_PORTAL_SETTINGS.heroCaptionLocation
-    );
-    setEditHeroCaptionTitle(
-      portalSettings.heroCaptionTitle || DEFAULT_PORTAL_SETTINGS.heroCaptionTitle
-    );
-    setEditHeroCaptionDescription(
-      portalSettings.heroCaptionDescription || DEFAULT_PORTAL_SETTINGS.heroCaptionDescription
-    );
-    setEditFooterSubtitle(
-      portalSettings.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle
-    );
-    setShowAdminHeroModal(true);
+  const openEditMenu = (tab: EditMenuTab = 'branding', itemId: string | null = null) => {
+    setEditMenuState({ isOpen: true, tab, itemId });
   };
 
-  const openHeroCaptionEditor = () => {
-    setEditHeroCaptionLocation(
-      portalSettings.heroCaptionLocation || DEFAULT_PORTAL_SETTINGS.heroCaptionLocation
-    );
-    setEditHeroCaptionTitle(
-      portalSettings.heroCaptionTitle || DEFAULT_PORTAL_SETTINGS.heroCaptionTitle
-    );
-    setEditHeroCaptionDescription(
-      portalSettings.heroCaptionDescription || DEFAULT_PORTAL_SETTINGS.heroCaptionDescription
-    );
-    setShowHeroCaptionModal(true);
-  };
-
-  const openFooterSubtitleEditor = () => {
-    setEditFooterSubtitle(
-      portalSettings.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle
-    );
-    setShowFooterEditModal(true);
-  };
-
-  const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      if (file.type === 'image/gif' && file.size <= 105000) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (typeof reader.result === 'string') {
-            setEditLogoUrl(reader.result);
-          }
-        };
-        reader.readAsDataURL(file);
-      } else {
-        const compressed = await fileToCompressedDataUrl(file, 360, 0.85);
-        setEditLogoUrl(compressed);
-      }
-    } catch (err) {
-      console.error('Logo upload error:', err);
-    } finally {
-      if (logoFileInputRef.current) {
-        logoFileInputRef.current.value = '';
-      }
-    }
-  };
-
-  const handleHeroFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const compressed = await fileToCompressedDataUrl(file, 800, 0.82);
-      setEditHeroImageUrl(compressed);
-    } catch (err) {
-      console.error('Hero photo upload error:', err);
-    } finally {
-      if (heroFileInputRef.current) {
-        heroFileInputRef.current.value = '';
-      }
-    }
-  };
-
-  const handleSaveHeroSettingsSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingHeroSettings(true);
-    try {
-      const finalLogo =
-        editLogoMode === 'link' && editLogoLink.trim()
-          ? normalizeImageUrl(editLogoLink)
-          : editLogoUrl || BNHS_ASSETS.eagleCrest;
-      const finalHeroImg =
-        editHeroMode === 'link' && editHeroLink.trim()
-          ? normalizeImageUrl(editHeroLink)
-          : editHeroImageUrl || BNHS_ASSETS.campusHero;
-
-      await handleSavePortalSettings({
-        logoUrl: finalLogo,
-        logoAnimated: editLogoAnimated,
-        heroImageUrl: finalHeroImg,
-        schoolKicker: editSchoolKicker,
-        portalSubtitle: editPortalSubtitle,
-        welcomeTitle: editWelcomeTitle,
-        mottoText: editMottoText,
-        welcomeDescription: editWelcomeDesc,
-        facebookUrl: editFacebookUrl.trim(),
-        twitterUrl: editTwitterUrl.trim(),
-        linkedinUrl: editLinkedinUrl.trim(),
-        heroCaptionLocation: editHeroCaptionLocation,
-        heroCaptionTitle: editHeroCaptionTitle,
-        heroCaptionDescription: editHeroCaptionDescription,
-        footerSubtitle: editFooterSubtitle,
-      });
-      setShowAdminHeroModal(false);
-      setAdminToast('Cloud Synced: Updated BNHS Logo, Picture, Welcome Content & Portal Texts!');
-    } finally {
-      setSavingHeroSettings(false);
-    }
-  };
-
-  const handleSaveHeroCaptionSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingHeroSettings(true);
-    try {
-      await handleSavePortalSettings({
-        heroCaptionLocation: editHeroCaptionLocation,
-        heroCaptionTitle: editHeroCaptionTitle,
-        heroCaptionDescription: editHeroCaptionDescription,
-      });
-      setShowHeroCaptionModal(false);
-      setAdminToast('Updated Hero Campus Caption text and synced!');
-    } finally {
-      setSavingHeroSettings(false);
-    }
-  };
-
-  const handleSaveFooterSubtitleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingHeroSettings(true);
-    try {
-      await handleSavePortalSettings({
-        footerSubtitle: editFooterSubtitle,
-      });
-      setShowFooterEditModal(false);
-      setAdminToast('Updated Footer location & motto text and synced!');
-    } finally {
-      setSavingHeroSettings(false);
-    }
+  const openDeleteMenu = (tab: DeleteMenuTab = 'directory', focusId: string | null = null) => {
+    setDeleteMenuState({ isOpen: true, tab, focusId });
   };
 
   return (
@@ -1358,8 +1274,8 @@ export default function App() {
             Barobo National High School
           </a>
 
-          {/* Zone 2: Navigation Links + Admin Menu beside Announcements */}
-          <nav className="hidden lg:flex flex-wrap items-center gap-4 xl:gap-6 text-xs xl:text-sm font-medium text-white/85">
+          {/* Zone 2: Navigation Links + Unified Edit Menu & Delete Menu beside Announcements */}
+          <nav className="hidden lg:flex flex-wrap items-center gap-4 xl:gap-5 text-xs xl:text-sm font-medium text-white/85">
             {[
               { id: 'home', label: 'Home' },
               { id: 'directory', label: 'Directory' },
@@ -1381,28 +1297,40 @@ export default function App() {
               </button>
             ))}
 
-            {/* Admin Menu beside Announcement menu */}
+            {/* Unified Edit Menu beside Announcements */}
             <button
               type="button"
-              onClick={openAdminHeroEditor}
+              onClick={() => openEditMenu('branding', null)}
               className="px-3 py-1.5 rounded-lg bg-[#650019] border border-[#D4AF37]/70 text-xs font-bold text-[#D4AF37] hover:bg-black/30 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-sm"
             >
-              <Settings className="w-3.5 h-3.5" />
-              <span>Admin Menu: Edit Logo, Picture & Welcome Content</span>
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Edit Menu</span>
+            </button>
+
+            {/* Unified Delete Menu beside Edit Menu */}
+            <button
+              type="button"
+              onClick={() => openDeleteMenu('directory', null)}
+              className="px-3 py-1.5 rounded-lg bg-[#650019] border border-red-400/60 text-xs font-bold text-red-200 hover:bg-red-700 hover:text-white transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-sm"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Menu</span>
             </button>
           </nav>
 
-          {/* Zone 3: Cloud Sync + Alumni Login / Dashboard Action */}
+          {/* Zone 3: Auto-Sync + Alumni Login / Dashboard Action */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handleManualCloudSync}
-              title={`Cloud Sync Active (${lastSyncedTime}) — Click to sync`}
+              title={`Auto-Sync Active (${lastSyncedTime}) — Automatically saves all changes`}
               className="px-2.5 py-2 rounded-lg bg-[#650019] border border-[#D4AF37]/40 text-[11px] font-semibold text-[#D4AF37] hover:bg-black/30 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Cloud className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">
-                {cloudSyncStatus === 'syncing' ? 'Syncing...' : 'Cloud Sync'}
+                {cloudSyncStatus === 'syncing'
+                  ? 'Auto-Syncing...'
+                  : `Auto-Synced · ${lastSyncedTime}`}
               </span>
             </button>
 
@@ -1423,7 +1351,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile & Tablet Quick Navigation Strip (with Admin Menu beside Announcements) */}
+        {/* Mobile & Tablet Quick Navigation Strip (with Unified Edit Menu & Delete Menu beside Announcements) */}
         <div className="lg:hidden mt-3 pt-2.5 border-t border-white/10 flex items-center gap-3 sm:gap-4 overflow-x-auto text-xs font-medium pb-1">
           {[
             { id: 'home', label: 'Home' },
@@ -1448,11 +1376,20 @@ export default function App() {
 
           <button
             type="button"
-            onClick={openAdminHeroEditor}
+            onClick={() => openEditMenu('branding', null)}
             className="px-2.5 py-1 rounded-md bg-[#650019] border border-[#D4AF37]/60 text-[11px] font-bold text-[#D4AF37] whitespace-nowrap shrink-0 inline-flex items-center gap-1 cursor-pointer"
           >
-            <Settings className="w-3 h-3" />
-            <span>Admin Menu: Edit Logo, Picture & Welcome Content</span>
+            <Edit3 className="w-3 h-3" />
+            <span>Edit Menu</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openDeleteMenu('directory', null)}
+            className="px-2.5 py-1 rounded-md bg-[#650019] border border-red-400/60 text-[11px] font-bold text-red-200 whitespace-nowrap shrink-0 inline-flex items-center gap-1 cursor-pointer"
+          >
+            <Trash2 className="w-3 h-3" />
+            <span>Delete Menu</span>
           </button>
         </div>
       </header>
@@ -1487,8 +1424,8 @@ export default function App() {
                   <div className="lg:col-span-7 flex flex-col justify-center">
                     <div className="flex items-center gap-3.5 sm:gap-4 mb-5 sm:mb-6">
                       <div
-                        onClick={openAdminHeroEditor}
-                        title="Click to edit BNHS Animated GIF Logo"
+                        onClick={() => openEditMenu('branding', null)}
+                        title="Click to edit BNHS Animated GIF Logo in Edit Menu"
                         className={`w-16 h-16 sm:w-20 sm:h-20 lg:w-24 lg:h-24 rounded-2xl overflow-hidden border-2 border-[#D4AF37] bg-white shrink-0 shadow-lg cursor-pointer ${
                           portalSettings.logoAnimated ? 'animate-bnhs-seal' : ''
                         }`}
@@ -1543,7 +1480,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Right Column: BNHS Campus Quadrangle Hero Card with Editable Caption Menu */}
+                  {/* Right Column: BNHS Campus Quadrangle Hero Card */}
                   <div className="lg:col-span-5 flex flex-col">
                     <div className="relative rounded-xl overflow-hidden border-2 border-[#D4AF37]/60 bg-[#450012] h-full min-h-[260px] sm:min-h-[320px] shadow-xl flex flex-col justify-end group">
                       <ResilientImage
@@ -1552,20 +1489,10 @@ export default function App() {
                         className="absolute inset-0 w-full h-full object-cover"
                       />
                       <div className="relative z-10 bg-gradient-to-t from-black/90 via-black/55 to-transparent p-5 sm:p-6 pt-16">
-                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                          <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold">
-                            {portalSettings.heroCaptionLocation ||
-                              DEFAULT_PORTAL_SETTINGS.heroCaptionLocation}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={openHeroCaptionEditor}
-                            className="px-2.5 py-1 rounded-md bg-[#450012]/90 border border-[#D4AF37]/60 text-[11px] font-bold text-[#D4AF37] hover:bg-[#650019] transition-colors inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Edit3 className="w-3 h-3" />
-                            Edit Text
-                          </button>
-                        </div>
+                        <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold mb-1">
+                          {portalSettings.heroCaptionLocation ||
+                            DEFAULT_PORTAL_SETTINGS.heroCaptionLocation}
+                        </p>
                         <p className="font-display text-base sm:text-lg font-bold text-white mt-0.5">
                           {portalSettings.heroCaptionTitle ||
                             DEFAULT_PORTAL_SETTINGS.heroCaptionTitle}
@@ -1677,16 +1604,13 @@ export default function App() {
               {/* Spotlight Carousel of Success Stories & Career Milestones */}
               <AlumniSpotlightCarousel
                 stories={combinedSpotlights}
-                currentUser={currentUser}
-                userProfile={myProfile}
-                onSignIn={handleSignIn}
-                onSaveSpotlight={handleSaveSpotlight}
-                onDeleteSpotlight={handleDeleteSpotlight}
                 onSelectBatchYear={(yr) => {
                   setDirectoryYearFilter(String(yr));
                   setDirectoryCityFilter('ALL');
                   setActiveTab('directory');
                 }}
+                onOpenEditMenu={(tab, itemId) => openEditMenu(tab, itemId ?? null)}
+                onOpenDeleteMenu={(tab, itemId) => openDeleteMenu(tab, itemId ?? null)}
               />
 
               {/* Most Active Batch Leaderboard & City Professional Distribution Density Map */}
@@ -1793,30 +1717,51 @@ export default function App() {
                     </div>
 
                     <div className="space-y-4">
-                      {combinedEvents.slice(0, 2).map((ev) => (
-                        <div
-                          key={ev.id}
-                          onClick={() => setActiveTab('events')}
-                          className="bg-white text-gray-900 rounded-xl p-5 border border-gray-200 hover:border-[#D4AF37] transition-colors cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2 text-xs font-semibold text-[#650019] mb-1">
-                            <span>{ev.category}</span>
-                            <span aria-hidden="true">·</span>
-                            <span>{ev.eventDate}</span>
+                      {combinedEvents.slice(0, 2).map((ev) => {
+                        const slideImages = [
+                          ...(ev.galleryUrls || []),
+                          ...(ev.imageUrl ? [ev.imageUrl] : []),
+                        ].filter(Boolean);
+
+                        return (
+                          <div
+                            key={ev.id}
+                            onClick={() => setActiveTab('events')}
+                            className="bg-white text-gray-900 rounded-xl overflow-hidden border border-gray-200 hover:border-[#D4AF37] transition-colors cursor-pointer"
+                          >
+                            <EventSlidingGallery
+                              images={
+                                slideImages.length > 0
+                                  ? slideImages
+                                  : [BNHS_ASSETS.homecomingEvent]
+                              }
+                              title={ev.title}
+                              category={ev.category}
+                              heightClass="h-36 sm:h-40"
+                              autoPlayIntervalMs={3800}
+                              onManageSlides={() => openEditMenu('events', ev.id)}
+                            />
+                            <div className="p-4">
+                              <div className="flex items-center gap-2 text-xs font-semibold text-[#650019] mb-1">
+                                <span>{ev.category}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{ev.eventDate}</span>
+                              </div>
+                              <h3 className="font-display text-base font-bold text-gray-900">
+                                {ev.title}
+                              </h3>
+                              <p className="text-xs text-gray-600 mt-1 line-clamp-2">
+                                {ev.description}
+                              </p>
+                            </div>
                           </div>
-                          <h3 className="font-display text-base font-bold text-gray-900">
-                            {ev.title}
-                          </h3>
-                          <p className="text-xs text-gray-600 mt-1 line-clamp-2">
-                            {ev.description}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 
                   <div className="mt-6 pt-4 border-t border-white/15 flex flex-wrap items-center justify-between gap-3 text-xs text-white/80">
-                    <span>Edit events, delete, upload photos, or RSVP online</span>
+                    <span>Sliding galleries for Homecoming, Batch Reunion, Mentorship, Scholarship & Outreach</span>
                     <button
                       type="button"
                       onClick={() => setActiveTab('events')}
@@ -1889,10 +1834,9 @@ export default function App() {
             initialYearFilter={directoryYearFilter}
             initialCityFilter={directoryCityFilter}
             portalSettings={portalSettings}
-            onSavePortalSettings={handleSavePortalSettings}
-            onSaveAlumnusProfile={handleSaveAlumnusProfile}
-            onDeleteAlumnusProfile={handleDeleteAlumnusProfile}
             onNavigateRegister={() => setShowRegistrationModal(true)}
+            onOpenEditMenu={(tab, itemId) => openEditMenu(tab, itemId ?? null)}
+            onOpenDeleteMenu={(tab, itemId) => openDeleteMenu(tab, itemId ?? null)}
           />
         )}
 
@@ -1921,12 +1865,11 @@ export default function App() {
             userRsvps={myRsvps}
             onSignIn={handleSignIn}
             onSaveEvent={handleSaveEvent}
-            onDeleteEvent={handleDeleteEvent}
-            onSaveAnnouncement={handleSaveAnnouncement}
-            onDeleteAnnouncement={handleDeleteAnnouncement}
             onSaveLocalRsvp={(eventId, rsvp) =>
               setMyRsvps((prev) => ({ ...prev, [eventId]: rsvp }))
             }
+            onOpenEditMenu={(tab, itemId) => openEditMenu(tab, itemId ?? null)}
+            onOpenDeleteMenu={(tab, itemId) => openDeleteMenu(tab, itemId ?? null)}
           />
         )}
 
@@ -1940,12 +1883,11 @@ export default function App() {
             userRsvps={myRsvps}
             onSignIn={handleSignIn}
             onSaveEvent={handleSaveEvent}
-            onDeleteEvent={handleDeleteEvent}
-            onSaveAnnouncement={handleSaveAnnouncement}
-            onDeleteAnnouncement={handleDeleteAnnouncement}
             onSaveLocalRsvp={(eventId, rsvp) =>
               setMyRsvps((prev) => ({ ...prev, [eventId]: rsvp }))
             }
+            onOpenEditMenu={(tab, itemId) => openEditMenu(tab, itemId ?? null)}
+            onOpenDeleteMenu={(tab, itemId) => openDeleteMenu(tab, itemId ?? null)}
           />
         )}
 
@@ -2122,617 +2064,40 @@ export default function App() {
         </div>
       )}
 
-      {/* Dedicated Modal: Edit Hero Campus Caption Text */}
-      {showHeroCaptionModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto"
-          onClick={() => setShowHeroCaptionModal(false)}
-        >
-          <div
-            className="bg-white text-gray-900 rounded-xl max-w-lg w-full overflow-hidden border-2 border-[#D4AF37]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-[#450012] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/40">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-bold">
-                  Hero Banner Caption Editor
-                </p>
-                <h2 className="font-display text-xl font-bold mt-0.5">
-                  Edit Campus Location & Legacy Text
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowHeroCaptionModal(false)}
-                className="text-white/70 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Unified Edit Menu Modal (All Edit Menus Combined into One) */}
+      <PortalEditMenuModal
+        isOpen={editMenuState.isOpen}
+        initialTab={editMenuState.tab}
+        initialItemId={editMenuState.itemId}
+        onClose={() => setEditMenuState((prev) => ({ ...prev, isOpen: false }))}
+        portalSettings={portalSettings}
+        alumniList={combinedAlumniDirectory}
+        events={combinedEvents}
+        announcements={combinedAnnouncements}
+        spotlights={combinedSpotlights}
+        onSavePortalSettings={handleSavePortalSettings}
+        onSaveEvent={handleSaveEvent}
+        onSaveAlumnusProfile={handleSaveAlumnusProfile}
+        onSaveAnnouncement={handleSaveAnnouncement}
+        onSaveSpotlight={handleSaveSpotlight}
+      />
 
-            <form onSubmit={handleSaveHeroCaptionSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Location Kicker *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editHeroCaptionLocation ?? ''}
-                  onChange={(e) => setEditHeroCaptionLocation(e.target.value)}
-                  placeholder="Poblacion, Barobo · Surigao del Sur"
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Headline Title *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editHeroCaptionTitle ?? ''}
-                  onChange={(e) => setEditHeroCaptionTitle(e.target.value)}
-                  placeholder="Home of the Soaring BNHS Eagles"
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Description *
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={editHeroCaptionDescription ?? ''}
-                  onChange={(e) => setEditHeroCaptionDescription(e.target.value)}
-                  placeholder="Over five decades of academic excellence, service, and community leadership across Caraga and beyond."
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-gray-200 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowHeroCaptionModal(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingHeroSettings}
-                  className="px-5 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5 text-[#D4AF37]" />
-                  {savingHeroSettings ? 'Saving...' : 'Save Caption'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Dedicated Modal: Edit Footer Location & Motto Subtitle */}
-      {showFooterEditModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto"
-          onClick={() => setShowFooterEditModal(false)}
-        >
-          <div
-            className="bg-white text-gray-900 rounded-xl max-w-lg w-full overflow-hidden border-2 border-[#D4AF37]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-[#450012] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/40">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-bold">
-                  Footer Content Editor
-                </p>
-                <h2 className="font-display text-xl font-bold mt-0.5">
-                  Edit School Address & Motto Line
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowFooterEditModal(false)}
-                className="text-white/70 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveFooterSubtitleSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Footer Subtitle Text *
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={editFooterSubtitle ?? ''}
-                  onChange={(e) => setEditFooterSubtitle(e.target.value)}
-                  placeholder="Poblacion, Barobo, Surigao del Sur · Caraga Region XIII · Once a Student, Always an Eagle!"
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-gray-200 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowFooterEditModal(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingHeroSettings}
-                  className="px-5 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5 text-[#D4AF37]" />
-                  {savingHeroSettings ? 'Saving...' : 'Save Footer Text'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Admin Menu Modal: Edit Animated GIF Logo, Hero Picture & Welcome Content */}
-      {showAdminHeroModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto"
-          onClick={() => setShowAdminHeroModal(false)}
-        >
-          <div
-            className="bg-white text-gray-900 rounded-xl max-w-2xl w-full overflow-hidden border-2 border-[#D4AF37] my-8"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-[#450012] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/40">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-bold">
-                  BNHS Portal Administration Menu
-                </p>
-                <h2 className="font-display text-xl font-bold mt-0.5">
-                  Edit Animated Logo, Hero Picture & Welcome Content
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAdminHeroModal(false)}
-                className="text-white/70 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleSaveHeroSettingsSubmit}
-              className="p-6 space-y-6 max-h-[80vh] overflow-y-auto"
-            >
-              {/* 1. Edit School Logo (GIF / Image) */}
-              <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-[#650019]">
-                      1. Official School Seal / Animated GIF Logo
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      Upload a local GIF/image or paste a Google link. Toggle GIF seal animation below.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-gray-300">
-                    <button
-                      type="button"
-                      onClick={() => setEditLogoMode('local')}
-                      className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
-                        editLogoMode === 'local'
-                          ? 'bg-[#650019] text-white'
-                          : 'text-gray-700'
-                      }`}
-                    >
-                      Upload File
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditLogoMode('link')}
-                      className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
-                        editLogoMode === 'link'
-                          ? 'bg-[#650019] text-white'
-                          : 'text-gray-700'
-                      }`}
-                    >
-                      Google / Web Link
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row items-center gap-4">
-                  <div
-                    className={`w-20 h-20 rounded-2xl overflow-hidden border-2 border-[#D4AF37] bg-white shrink-0 flex items-center justify-center ${
-                      editLogoAnimated ? 'animate-bnhs-seal' : ''
-                    }`}
-                  >
-                    <ResilientImage
-                      src={editLogoUrl || BNHS_ASSETS.eagleCrest}
-                      alt="Logo Preview"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-
-                  <div className="flex-1 w-full space-y-2.5">
-                    {editLogoMode === 'local' ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          ref={logoFileInputRef}
-                          type="file"
-                          accept="image/*,.gif"
-                          onChange={handleLogoFileUpload}
-                          className="hidden"
-                          id="admin-logo-file-input"
-                        />
-                        <label
-                          htmlFor="admin-logo-file-input"
-                          className="px-3.5 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Upload className="w-3.5 h-3.5 text-[#D4AF37]" />
-                          Upload Local GIF / Logo
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditLogoUrl(BNHS_ASSETS.eagleCrest);
-                            setEditLogoAnimated(true);
-                          }}
-                          className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100 cursor-pointer"
-                        >
-                          Use Official Animated BNHS GIF Seal
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <input
-                          type="url"
-                          value={editLogoLink ?? ''}
-                          onChange={(e) => {
-                            setEditLogoLink(e.target.value);
-                            setEditLogoUrl(normalizeImageUrl(e.target.value));
-                          }}
-                          placeholder="Paste Google Drive link or GIF/image URL..."
-                          className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-xs"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setEditLogoUrl(normalizeImageUrl(editLogoLink))}
-                          className="px-3 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold cursor-pointer"
-                        >
-                          <Link2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-
-                    <label className="flex items-center gap-2 text-xs font-semibold text-gray-800 cursor-pointer pt-1">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(editLogoAnimated)}
-                        onChange={(e) => setEditLogoAnimated(e.target.checked)}
-                        className="accent-[#650019]"
-                      />
-                      <span>Enable Animated GIF Pulse & Glow Effect on School Logo</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. Edit Hero Campus Picture */}
-              <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-[#650019]">
-                      2. Hero Campus Picture
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      Update the main featured Barobo National High School photograph on the Home section.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-gray-300">
-                    <button
-                      type="button"
-                      onClick={() => setEditHeroMode('local')}
-                      className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
-                        editHeroMode === 'local'
-                          ? 'bg-[#650019] text-white'
-                          : 'text-gray-700'
-                      }`}
-                    >
-                      Upload File
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditHeroMode('link')}
-                      className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
-                        editHeroMode === 'link'
-                          ? 'bg-[#650019] text-white'
-                          : 'text-gray-700'
-                      }`}
-                    >
-                      Google / Web Link
-                    </button>
-                  </div>
-                </div>
-
-                <div className="h-36 w-full rounded-lg overflow-hidden bg-[#450012] border border-[#D4AF37]/50">
-                  <ResilientImage
-                    src={editHeroImageUrl || BNHS_ASSETS.campusHero}
-                    alt="Hero Campus Preview"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                {editHeroMode === 'local' ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      ref={heroFileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleHeroFileUpload}
-                      className="hidden"
-                      id="admin-hero-file-input"
-                    />
-                    <label
-                      htmlFor="admin-hero-file-input"
-                      className="px-3.5 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Upload className="w-3.5 h-3.5 text-[#D4AF37]" />
-                      Upload Local Campus Photo
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setEditHeroImageUrl(BNHS_ASSETS.campusHero)}
-                      className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100 cursor-pointer"
-                    >
-                      Restore Default Campus Photo
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <input
-                      type="url"
-                      value={editHeroLink ?? ''}
-                      onChange={(e) => {
-                        setEditHeroLink(e.target.value);
-                        setEditHeroImageUrl(normalizeImageUrl(e.target.value));
-                      }}
-                      placeholder="Paste Google Drive link or direct image URL..."
-                      className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setEditHeroImageUrl(normalizeImageUrl(editHeroLink))}
-                      className="px-3 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold cursor-pointer"
-                    >
-                      Apply
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* 3. Edit Welcome Content & Hero Caption */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-bold text-[#650019] border-b border-gray-200 pb-2">
-                  3. Welcome Section Text, Hero Caption & Footer Content
-                </h3>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                      School Name Kicker *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={editSchoolKicker ?? ''}
-                      onChange={(e) => setEditSchoolKicker(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                      Portal Subtitle *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={editPortalSubtitle ?? ''}
-                      onChange={(e) => setEditPortalSubtitle(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Main Welcome Heading *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editWelcomeTitle ?? ''}
-                    onChange={(e) => setEditWelcomeTitle(e.target.value)}
-                    placeholder="Welcome, BNHS Alumni!"
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Alumni Motto Line *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editMottoText ?? ''}
-                    onChange={(e) => setEditMottoText(e.target.value)}
-                    placeholder="Once a Student, Always an Eagle!"
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm font-semibold text-[#650019]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Welcome Paragraph Content *
-                  </label>
-                  <textarea
-                    rows={3}
-                    required
-                    value={editWelcomeDesc ?? ''}
-                    onChange={(e) => setEditWelcomeDesc(e.target.value)}
-                    placeholder="Reconnect. Remember. Celebrate. Stay Connected. Join the official digital home of Barobo National High School graduates from Batch 1982 to Batch 2026."
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                      Hero Caption Location *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={editHeroCaptionLocation ?? ''}
-                      onChange={(e) => setEditHeroCaptionLocation(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                      Hero Caption Title *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={editHeroCaptionTitle ?? ''}
-                      onChange={(e) => setEditHeroCaptionTitle(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Hero Caption Description *
-                  </label>
-                  <textarea
-                    rows={2}
-                    required
-                    value={editHeroCaptionDescription ?? ''}
-                    onChange={(e) => setEditHeroCaptionDescription(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Footer Address & Motto Text *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editFooterSubtitle ?? ''}
-                    onChange={(e) => setEditFooterSubtitle(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-              </div>
-
-              {/* 4. School Social Media Links (Facebook, Twitter, LinkedIn) */}
-              <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-4">
-                <div>
-                  <h3 className="text-sm font-bold text-[#650019]">
-                    4. School Social Media Links (Rendered as Footer Icons)
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Manage the official Barobo National High School social media profiles displayed as interactive icons in the portal footer.
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1 flex items-center gap-1.5">
-                      <Facebook className="w-3.5 h-3.5 text-[#650019]" />
-                      <span>Facebook Page URL</span>
-                    </label>
-                    <input
-                      type="url"
-                      value={editFacebookUrl ?? ''}
-                      onChange={(e) => setEditFacebookUrl(e.target.value)}
-                      placeholder="https://www.facebook.com/BaroboNationalHighSchool"
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1 flex items-center gap-1.5">
-                      <Twitter className="w-3.5 h-3.5 text-[#650019]" />
-                      <span>Twitter / X Profile URL</span>
-                    </label>
-                    <input
-                      type="url"
-                      value={editTwitterUrl ?? ''}
-                      onChange={(e) => setEditTwitterUrl(e.target.value)}
-                      placeholder="https://twitter.com/BNHSAlumni"
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1 flex items-center gap-1.5">
-                      <Linkedin className="w-3.5 h-3.5 text-[#650019]" />
-                      <span>LinkedIn School Page URL</span>
-                    </label>
-                    <input
-                      type="url"
-                      value={editLinkedinUrl ?? ''}
-                      onChange={(e) => setEditLinkedinUrl(e.target.value)}
-                      placeholder="https://www.linkedin.com/school/barobo-national-high-school"
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <p className="text-xs font-semibold text-[#650019] text-center sm:text-left">
-                  BNHS Alumni Portal developed by: Bless T. Tajale
-                </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowAdminHeroModal(false)}
-                    className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={savingHeroSettings}
-                    className="px-5 py-2.5 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-2 cursor-pointer"
-                  >
-                    <Save className="w-4 h-4 text-[#D4AF37]" />
-                    {savingHeroSettings
-                      ? 'Saving Changes...'
-                      : 'Save & Sync All Settings'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Unified Delete Menu Modal (All Delete Menus Combined into One) */}
+      <PortalDeleteMenuModal
+        isOpen={deleteMenuState.isOpen}
+        initialTab={deleteMenuState.tab}
+        initialFocusId={deleteMenuState.focusId}
+        onClose={() => setDeleteMenuState((prev) => ({ ...prev, isOpen: false }))}
+        alumniList={combinedAlumniDirectory}
+        events={combinedEvents}
+        announcements={combinedAnnouncements}
+        spotlights={combinedSpotlights}
+        onDeleteAlumnusProfile={handleDeleteAlumnusProfile}
+        onDeleteEvent={handleDeleteEvent}
+        onDeleteEventSlide={handleDeleteEventSlide}
+        onDeleteAnnouncement={handleDeleteAnnouncement}
+        onDeleteSpotlight={handleDeleteSpotlight}
+      />
 
       {/* Dark Maroon Institutional Footer */}
       <footer className="bg-[#450012] border-t border-[#D4AF37]/30 text-white py-10 px-3 sm:px-6 lg:px-8 mt-12">
@@ -2754,19 +2119,9 @@ export default function App() {
                 <p className="font-display text-sm font-bold tracking-wider text-[#D4AF37]">
                   BAROBO NATIONAL HIGH SCHOOL • ALUMNI COMMUNITY
                 </p>
-                <div className="flex flex-wrap items-center gap-2 mt-1">
-                  <p className="text-xs text-white/80">
-                    {portalSettings.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={openFooterSubtitleEditor}
-                    className="px-2 py-0.5 rounded bg-[#650019] border border-[#D4AF37]/50 text-[11px] font-bold text-[#D4AF37] hover:bg-black/30 inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Edit3 className="w-2.5 h-2.5" />
-                    Edit
-                  </button>
-                </div>
+                <p className="text-xs text-white/80 mt-1">
+                  {portalSettings.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle}
+                </p>
               </div>
             </div>
 
@@ -2775,10 +2130,17 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-4 sm:gap-5 text-xs text-white/80">
                 <button
                   type="button"
-                  onClick={openAdminHeroEditor}
+                  onClick={() => openEditMenu('branding', null)}
                   className="text-[#D4AF37] font-semibold hover:underline transition-colors cursor-pointer"
                 >
-                  Admin: Edit Logo, Welcome & Socials
+                  Edit Menu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openDeleteMenu('directory', null)}
+                  className="text-red-300 font-semibold hover:underline transition-colors cursor-pointer"
+                >
+                  Delete Menu
                 </button>
                 <button
                   type="button"

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import {
@@ -12,14 +12,12 @@ import {
   Edit3,
   Upload,
   Link2,
-  Save,
-  Camera,
   Trash2,
+  Images,
 } from 'lucide-react';
 import {
   ALLOWED_ANNOUNCEMENT_CATEGORIES,
   ALLOWED_EVENT_CATEGORIES,
-  AnnouncementCategory,
   auth,
   db,
   EventCategory,
@@ -37,7 +35,7 @@ import {
   BNHS_ASSETS,
   EventRsvpRecord,
 } from '../data/bnhsData';
-import { ResilientImage } from './ResilientImage';
+import { EventSlidingGallery } from './EventSlidingGallery';
 
 interface EventsAndAnnouncementsProps {
   mode: 'events' | 'announcements';
@@ -48,10 +46,9 @@ interface EventsAndAnnouncementsProps {
   userRsvps: Record<string, EventRsvpRecord>;
   onSignIn: () => Promise<void>;
   onSaveEvent: (eventData: AlumniEventRecord, isNew: boolean) => Promise<void>;
-  onDeleteEvent: (eventId: string, title: string) => Promise<void>;
-  onSaveAnnouncement: (annData: AnnouncementRecord, isNew: boolean) => Promise<void>;
-  onDeleteAnnouncement: (annId: string, title: string) => Promise<void>;
   onSaveLocalRsvp?: (eventId: string, rsvp: EventRsvpRecord) => void;
+  onOpenEditMenu: (tab: 'events' | 'announcements', itemId?: string | null) => void;
+  onOpenDeleteMenu: (tab: 'events' | 'announcements', itemId?: string | null) => void;
 }
 
 export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps> = ({
@@ -63,138 +60,111 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
   userRsvps,
   onSignIn,
   onSaveEvent,
-  onDeleteEvent,
-  onSaveAnnouncement,
-  onDeleteAnnouncement,
   onSaveLocalRsvp,
+  onOpenEditMenu,
+  onOpenDeleteMenu,
 }) => {
   const [selectedEventCategory, setSelectedEventCategory] = useState<string>('ALL');
   const [selectedAnnCategory, setSelectedAnnCategory] = useState<string>('ALL');
   const [rsvpBusyId, setRsvpBusyId] = useState<string | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
-
-  // Modals for reading full announcement or creating/editing an event / announcement
   const [activeAnnouncement, setActiveAnnouncement] = useState<AnnouncementRecord | null>(null);
-  const [showEventModal, setShowEventModal] = useState(false);
-  const [editingEventId, setEditingEventId] = useState<string | null>(null);
-  const [showCreateAnnModal, setShowCreateAnnModal] = useState(false);
-  const [editingAnnId, setEditingAnnId] = useState<string | null>(null);
 
-  // Create / Edit Event State
-  const [eventTitle, setEventTitle] = useState('');
-  const [eventCategory, setEventCategory] = useState<EventCategory>('Homecoming');
-  const [eventDate, setEventDate] = useState('');
-  const [eventVenue, setEventVenue] = useState('');
-  const [eventDesc, setEventDesc] = useState('');
-  const [eventStatus, setEventStatus] = useState<
-    'upcoming' | 'ongoing' | 'completed' | 'archived'
-  >('upcoming');
-  const [eventImageUrl, setEventImageUrl] = useState('');
-  const [eventPhotoMode, setEventPhotoMode] = useState<'local' | 'link'>('local');
-  const [eventPhotoLink, setEventPhotoLink] = useState('');
-  const [uploadingEventPhoto, setUploadingEventPhoto] = useState(false);
-  const [savingEvent, setSavingEvent] = useState(false);
+  // 5-Category Sliding Showcase State
+  const [showcaseCategory, setShowcaseCategory] = useState<EventCategory>('Homecoming');
+  const [showcaseUploadMode, setShowcaseUploadMode] = useState<'local' | 'link'>('local');
+  const [showcaseLinkInput, setShowcaseLinkInput] = useState('');
+  const [uploadingShowcasePhoto, setUploadingShowcasePhoto] = useState(false);
+  const showcaseFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const eventFileInputRef = useRef<HTMLInputElement | null>(null);
+  // Find target event & slides for the selected showcase category
+  const showcaseEvent = useMemo(() => {
+    return events.find((ev) => ev.category === showcaseCategory) || null;
+  }, [events, showcaseCategory]);
 
-  // Create / Edit Announcement State
-  const [newAnnTitle, setNewAnnTitle] = useState('');
-  const [newAnnCategory, setNewAnnCategory] = useState<AnnouncementCategory>('Official Bulletin');
-  const [newAnnAuthor, setNewAnnAuthor] = useState('');
-  const [newAnnSummary, setNewAnnSummary] = useState('');
-  const [newAnnContent, setNewAnnContent] = useState('');
-  const [creatingAnn, setCreatingAnn] = useState(false);
+  const showcaseSlides = useMemo(() => {
+    const matching = events.filter((ev) => ev.category === showcaseCategory);
+    const urls = matching.flatMap((ev) => [
+      ...(ev.galleryUrls || []),
+      ...(ev.imageUrl ? [ev.imageUrl] : []),
+    ]);
+    const unique = Array.from(new Set(urls.filter(Boolean)));
+    return unique.length > 0 ? unique : [BNHS_ASSETS.homecomingEvent, BNHS_ASSETS.campusHero];
+  }, [events, showcaseCategory]);
 
-  const openCreateEventModal = () => {
-    setEditingEventId(null);
-    setEventTitle('');
-    setEventCategory(
-      selectedEventCategory !== 'ALL'
-        ? (selectedEventCategory as EventCategory)
-        : 'Homecoming'
-    );
-    setEventDate('');
-    setEventVenue('Barobo National High School Grand Gymnasium, Poblacion, Barobo');
-    setEventDesc('');
-    setEventStatus('upcoming');
-    setEventImageUrl(BNHS_ASSETS.homecomingEvent);
-    setEventPhotoLink('');
-    setShowEventModal(true);
-  };
-
-  const openEditEventModal = (ev: AlumniEventRecord) => {
-    setEditingEventId(ev.id);
-    setEventTitle(ev.title || '');
-    setEventCategory(ev.category || 'Homecoming');
-    setEventDate(ev.eventDate || '');
-    setEventVenue(ev.venue || '');
-    setEventDesc(ev.description || '');
-    setEventStatus(ev.status || 'upcoming');
-    const currentImg = ev.imageUrl || BNHS_ASSETS.homecomingEvent;
-    setEventImageUrl(currentImg);
-    setEventPhotoLink(currentImg.startsWith('http') ? currentImg : '');
-    setShowEventModal(true);
-  };
-
-  const handleDeleteEventClick = async (ev: AlumniEventRecord) => {
-    await onDeleteEvent(ev.id, ev.title);
-    if (editingEventId === ev.id) {
-      setShowEventModal(false);
-      setEditingEventId(null);
+  const appendSlidesToCategory = async (newUrls: string[]) => {
+    if (newUrls.length === 0) return;
+    if (showcaseEvent) {
+      const existing = [
+        ...(showcaseEvent.galleryUrls || []),
+        ...(showcaseEvent.imageUrl ? [showcaseEvent.imageUrl] : []),
+      ].filter(Boolean);
+      const merged = Array.from(new Set([...existing, ...newUrls])).slice(0, 10);
+      await onSaveEvent(
+        {
+          ...showcaseEvent,
+          imageUrl: merged[0],
+          galleryUrls: merged,
+        },
+        false
+      );
+      setFeedbackBanner(
+        `Added & auto-synced ${newUrls.length} sliding photo(s) to ${showcaseCategory} ("${showcaseEvent.title}").`
+      );
+    } else {
+      const newId = sanitizeId(`evt_${Date.now()}`);
+      const merged = Array.from(new Set(newUrls)).slice(0, 10);
+      const newEvent: AlumniEventRecord = {
+        id: newId,
+        authorId: currentUser?.uid || 'system_bnhs_admin',
+        title: `BNHS ${showcaseCategory} Gathering`,
+        category: showcaseCategory,
+        eventDate: 'Upcoming Schedule · TBA',
+        venue: 'Barobo National High School Campus, Poblacion, Barobo',
+        description: `Official ${showcaseCategory} celebration and alumni fellowship gallery for Barobo National High School graduates.`,
+        status: 'upcoming',
+        visibility: 'public',
+        imageUrl: merged[0],
+        galleryUrls: merged,
+      };
+      await onSaveEvent(newEvent, true);
+      setFeedbackBanner(
+        `Created ${showcaseCategory} showcase event and auto-synced ${merged.length} sliding photo(s).`
+      );
     }
-    setFeedbackBanner(`Removed event "${ev.title}" from Alumni Events.`);
   };
 
-  const openCreateAnnModal = () => {
-    setEditingAnnId(null);
-    setNewAnnTitle('');
-    setNewAnnCategory(
-      selectedAnnCategory !== 'ALL'
-        ? (selectedAnnCategory as AnnouncementCategory)
-        : 'Official Bulletin'
-    );
-    setNewAnnAuthor(userProfile?.fullName || currentUser?.displayName || 'BNHS Alumni Federation');
-    setNewAnnSummary('');
-    setNewAnnContent('');
-    setShowCreateAnnModal(true);
-  };
-
-  const openEditAnnModal = (ann: AnnouncementRecord) => {
-    setEditingAnnId(ann.id);
-    setNewAnnTitle(ann.title || '');
-    setNewAnnCategory(ann.category || 'Official Bulletin');
-    setNewAnnAuthor(ann.authorName || 'BNHS Alumni Federation');
-    setNewAnnSummary(ann.summary || '');
-    setNewAnnContent(ann.content || '');
-    setShowCreateAnnModal(true);
-  };
-
-  const handleDeleteAnnouncementClick = async (ann: AnnouncementRecord) => {
-    await onDeleteAnnouncement(ann.id, ann.title);
-    if (activeAnnouncement?.id === ann.id) {
-      setActiveAnnouncement(null);
-    }
-    if (editingAnnId === ann.id) {
-      setShowCreateAnnModal(false);
-      setEditingAnnId(null);
-    }
-    setFeedbackBanner(`Deleted announcement "${ann.title}".`);
-  };
-
-  const handleEventPhotoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadingEventPhoto(true);
+  const handleShowcaseLocalUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploadingShowcasePhoto(true);
     try {
-      const compressedDataUrl = await fileToCompressedDataUrl(file, 720, 0.8);
-      setEventImageUrl(compressedDataUrl);
-    } catch (err) {
-      console.error('Error processing event image:', err);
-    } finally {
-      setUploadingEventPhoto(false);
-      if (eventFileInputRef.current) {
-        eventFileInputRef.current.value = '';
+      const uploaded: string[] = [];
+      for (let i = 0; i < files.length && uploaded.length < 5; i++) {
+        const dataUrl = await fileToCompressedDataUrl(files[i], 560, 0.72);
+        uploaded.push(dataUrl);
       }
+      await appendSlidesToCategory(uploaded);
+    } catch (err) {
+      console.error('Error uploading showcase photo:', err);
+    } finally {
+      setUploadingShowcasePhoto(false);
+      if (showcaseFileInputRef.current) {
+        showcaseFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleShowcaseLinkAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const normalized = normalizeImageUrl(showcaseLinkInput);
+    if (!normalized) return;
+    setUploadingShowcasePhoto(true);
+    try {
+      await appendSlidesToCategory([normalized]);
+      setShowcaseLinkInput('');
+    } finally {
+      setUploadingShowcasePhoto(false);
     }
   };
 
@@ -231,7 +201,7 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
       setFeedbackBanner(
         desiredStatus === 'cancelled'
           ? `Your RSVP for "${eventItem.title}" has been cancelled.`
-          : `Confirmed! You are marked as "${desiredStatus}" for ${eventItem.title}.`
+          : `Confirmed & auto-synced! You are marked as "${desiredStatus}" for ${eventItem.title}.`
       );
       return;
     }
@@ -239,10 +209,19 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
     setRsvpBusyId(eventItem.id);
 
     try {
-      // Ensure parent event exists in Firestore to satisfy Global Consistency Invariant exists(/events/$(eventId))
       const eventRef = doc(db, 'events', eventItem.id);
       const eventSnap = await getDoc(eventRef);
       if (!eventSnap.exists()) {
+        const slides = Array.from(
+          new Set([
+            ...(eventItem.galleryUrls || []),
+            ...(eventItem.imageUrl ? [eventItem.imageUrl] : []),
+          ])
+        )
+          .filter(Boolean)
+          .slice(0, 10)
+          .map((u) => sanitizeString(u, 150000));
+
         await setDoc(eventRef, {
           authorId: currentUser.uid,
           title: sanitizeString(eventItem.title, 140),
@@ -251,9 +230,10 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
           venue: sanitizeString(eventItem.venue, 140),
           description: sanitizeString(eventItem.description, 1000),
           imageUrl: sanitizeString(
-            eventItem.imageUrl || BNHS_ASSETS.homecomingEvent,
+            eventItem.imageUrl || slides[0] || BNHS_ASSETS.homecomingEvent,
             150000
           ),
+          galleryUrls: slides,
           status: eventItem.status,
           visibility: 'public',
           createdAt: serverTimestamp(),
@@ -290,115 +270,12 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
       setFeedbackBanner(
         desiredStatus === 'cancelled'
           ? `Your RSVP for "${eventItem.title}" has been cancelled.`
-          : `Confirmed! You are marked as "${desiredStatus}" for ${eventItem.title}.`
+          : `Confirmed & auto-synced! You are marked as "${desiredStatus}" for ${eventItem.title}.`
       );
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `event_rsvps/${rsvpDocId}`);
     } finally {
       setRsvpBusyId(null);
-    }
-  };
-
-  const handleSaveEventSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const cleanTitle = sanitizeString(eventTitle, 140);
-    const cleanDate = sanitizeString(eventDate, 50);
-    const cleanVenue = sanitizeString(eventVenue, 140);
-    const cleanDesc = sanitizeString(eventDesc, 1000);
-    const rawPhoto =
-      eventPhotoMode === 'link' && eventPhotoLink.trim()
-        ? normalizeImageUrl(eventPhotoLink)
-        : eventImageUrl || BNHS_ASSETS.homecomingEvent;
-    const cleanImageUrl = sanitizeString(rawPhoto, 150000);
-
-    if (
-      cleanTitle.length < 5 ||
-      cleanDate.length < 4 ||
-      cleanVenue.length < 3 ||
-      cleanDesc.length < 10
-    ) {
-      return;
-    }
-
-    setSavingEvent(true);
-    const isNew = !editingEventId;
-    const targetId = editingEventId || sanitizeId(`evt_${Date.now()}`);
-
-    const eventRecord: AlumniEventRecord = {
-      id: targetId,
-      authorId: currentUser?.uid || 'system_bnhs_admin',
-      title: cleanTitle,
-      category: eventCategory,
-      eventDate: cleanDate,
-      venue: cleanVenue,
-      description: cleanDesc,
-      status: eventStatus,
-      visibility: 'public',
-      imageUrl: cleanImageUrl,
-    };
-
-    try {
-      await onSaveEvent(eventRecord, isNew);
-      setShowEventModal(false);
-      setFeedbackBanner(
-        isNew
-          ? `New ${eventCategory} event "${cleanTitle}" has been published with its photo banner.`
-          : `Updated "${cleanTitle}" (${eventCategory}) and its event photo banner.`
-      );
-    } finally {
-      setSavingEvent(false);
-    }
-  };
-
-  const handleCreateAnnouncement = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const cleanTitle = sanitizeString(newAnnTitle, 150);
-    const cleanAuthor = sanitizeString(
-      newAnnAuthor || userProfile?.fullName || currentUser?.displayName || 'BNHS Alumni Officer',
-      100
-    );
-    const cleanSummary = sanitizeString(newAnnSummary, 300);
-    const cleanContent = sanitizeString(newAnnContent, 2000);
-
-    if (cleanTitle.length < 5 || cleanSummary.length < 10 || cleanContent.length < 20) {
-      return;
-    }
-
-    setCreatingAnn(true);
-    const isNew = !editingAnnId;
-    const annId = editingAnnId || sanitizeId(`ann_${Date.now()}`);
-    const annRecord: AnnouncementRecord = {
-      id: annId,
-      authorId: currentUser?.uid || 'system_bnhs_admin',
-      authorName: cleanAuthor,
-      title: cleanTitle,
-      category: newAnnCategory,
-      summary: cleanSummary,
-      content: cleanContent,
-      status: 'published',
-      visibility: 'public',
-      publishedLabel: 'Verified Portal Release',
-    };
-
-    try {
-      await onSaveAnnouncement(annRecord, isNew);
-      if (activeAnnouncement?.id === annId) {
-        setActiveAnnouncement(annRecord);
-      }
-      setShowCreateAnnModal(false);
-      setEditingAnnId(null);
-      setNewAnnTitle('');
-      setNewAnnSummary('');
-      setNewAnnContent('');
-      setFeedbackBanner(
-        isNew
-          ? 'Official announcement published to the BNHS Alumni Portal.'
-          : `Updated official announcement "${cleanTitle}".`
-      );
-    } finally {
-      setCreatingAnn(false);
     }
   };
 
@@ -408,31 +285,42 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
     );
 
     return (
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="bg-[#450012] border border-[#D4AF37]/30 rounded-xl p-6 sm:p-8 mb-8">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+        {/* Events Header */}
+        <div className="bg-[#450012] border border-[#D4AF37]/30 rounded-xl p-6 sm:p-8">
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
             <div>
               <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold mb-2">
                 Barobo National High School · Campus & Chapter Activities
               </p>
               <h1 className="font-display text-2xl sm:text-4xl font-bold text-white">
-                Alumni Events & Homecomings
+                Alumni Events & Sliding Photo Galleries
               </h1>
               <p className="text-white/80 text-sm sm:text-base mt-2 max-w-2xl leading-relaxed">
-                Participate in or edit events and upload custom photos for Homecoming, Batch Reunion, Career Mentorship, Scholarship Drive, and Community Outreach activities.
+                Explore auto-sliding photo carousels and upload local photos or Google links for Homecoming, Batch Reunion, Career Mentorship, Scholarship Drive, and Community Outreach.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openCreateEventModal}
-              className="px-5 py-3 rounded-lg bg-[#D4AF37] text-[#450012] font-semibold text-sm hover:bg-[#e3c14d] transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              Post Event & Upload Photo
-            </button>
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => onOpenEditMenu('events', 'NEW')}
+                className="px-4 py-2.5 rounded-lg bg-[#D4AF37] text-[#450012] font-bold text-xs sm:text-sm hover:bg-[#e3c14d] transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                Add / Edit Event in Edit Menu
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenDeleteMenu('events', null)}
+                className="px-4 py-2.5 rounded-lg bg-[#650019] border border-red-400/50 text-white font-bold text-xs sm:text-sm hover:bg-red-700 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Events
+              </button>
+            </div>
           </div>
 
-          {/* Interactive Category Filter Bar (Homecoming, Batch Reunion, Career Mentorship, Scholarship Drive, Community Outreach) */}
+          {/* Interactive Category Filter Bar */}
           <div className="mt-6 pt-6 border-t border-white/15 flex flex-wrap items-center gap-1.5">
             <button
               type="button"
@@ -463,24 +351,152 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
         </div>
 
         {feedbackBanner && (
-          <div className="mb-6 p-4 rounded-xl bg-[#450012] border border-[#D4AF37] text-white text-sm flex items-center justify-between">
+          <div className="p-4 rounded-xl bg-[#450012] border border-[#D4AF37] text-white text-sm flex items-center justify-between gap-3">
             <span>{feedbackBanner}</span>
             <button
               type="button"
               onClick={() => setFeedbackBanner(null)}
-              className="text-[#D4AF37] hover:underline text-xs ml-4 cursor-pointer"
+              className="text-[#D4AF37] hover:underline text-xs ml-4 cursor-pointer shrink-0"
             >
               Dismiss
             </button>
           </div>
         )}
 
+        {/* Featured 5-Category Sliding Picture Showcase */}
+        <div className="bg-[#450012] border border-[#D4AF37]/40 rounded-xl overflow-hidden shadow-lg">
+          <div className="p-5 sm:p-6 border-b border-white/15 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-bold flex items-center gap-1.5">
+                <Images className="w-4 h-4" />
+                <span>Featured Event Category Sliding Showcase · Auto-Sync Enabled</span>
+              </p>
+              <h2 className="font-display text-xl sm:text-2xl font-bold text-white mt-1">
+                {showcaseCategory} Highlight Slides ({showcaseSlides.length} Photos)
+              </h2>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {ALLOWED_EVENT_CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setShowcaseCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                    showcaseCategory === cat
+                      ? 'bg-[#D4AF37] text-[#450012]'
+                      : 'bg-[#650019] text-white/85 hover:text-white'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <EventSlidingGallery
+            images={showcaseSlides}
+            title={showcaseEvent?.title || `BNHS ${showcaseCategory} Photo Highlights`}
+            category={showcaseCategory}
+            heightClass="h-64 sm:h-80 lg:h-96"
+            autoPlayIntervalMs={3600}
+            showCaptionOverlay={true}
+            onManageSlides={
+              showcaseEvent
+                ? () => onOpenEditMenu('events', showcaseEvent.id)
+                : () => onOpenEditMenu('events', 'NEW')
+            }
+          />
+
+          {/* Quick Local Upload / Google Link Slide Adder */}
+          <div className="p-4 sm:p-5 bg-white text-gray-900 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#650019]">
+                Add {showcaseCategory} Slide:
+              </span>
+              <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setShowcaseUploadMode('local')}
+                  className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
+                    showcaseUploadMode === 'local'
+                      ? 'bg-[#650019] text-white'
+                      : 'text-gray-700'
+                  }`}
+                >
+                  Local File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowcaseUploadMode('link')}
+                  className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
+                    showcaseUploadMode === 'link'
+                      ? 'bg-[#650019] text-white'
+                      : 'text-gray-700'
+                  }`}
+                >
+                  Google Link
+                </button>
+              </div>
+            </div>
+
+            {showcaseUploadMode === 'local' ? (
+              <div className="flex flex-wrap items-center gap-2.5 flex-1 md:justify-end">
+                <input
+                  ref={showcaseFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleShowcaseLocalUpload}
+                  className="hidden"
+                  id="showcase-slide-local-upload"
+                />
+                <label
+                  htmlFor="showcase-slide-local-upload"
+                  className="px-4 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-[#D4AF37]" />
+                  {uploadingShowcasePhoto
+                    ? 'Uploading & Auto-Syncing...'
+                    : `Upload Local Photo(s) to ${showcaseCategory}`}
+                </label>
+              </div>
+            ) : (
+              <form
+                onSubmit={handleShowcaseLinkAdd}
+                className="flex flex-1 gap-2 max-w-xl md:justify-end"
+              >
+                <input
+                  type="url"
+                  required
+                  value={showcaseLinkInput ?? ''}
+                  onChange={(e) => setShowcaseLinkInput(e.target.value)}
+                  placeholder={`Paste Google Drive or web photo link for ${showcaseCategory}...`}
+                  className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-xs"
+                />
+                <button
+                  type="submit"
+                  disabled={uploadingShowcasePhoto}
+                  className="px-4 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <Link2 className="w-3.5 h-3.5 text-[#D4AF37]" />
+                  {uploadingShowcasePhoto ? 'Syncing...' : 'Add Slide Link'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+
+        {/* Event Cards Grid with Auto-Sliding Galleries */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {filteredEvents.map((ev, index) => {
             const myRsvp = userRsvps[ev.id];
-            const imgSource =
-              ev.imageUrl ||
-              (index % 2 === 0 ? BNHS_ASSETS.homecomingEvent : BNHS_ASSETS.mentorshipEvent);
+            const fallbackImg =
+              index % 2 === 0 ? BNHS_ASSETS.homecomingEvent : BNHS_ASSETS.mentorshipEvent;
+            const slideImages = [
+              ...(ev.galleryUrls || []),
+              ...(ev.imageUrl ? [ev.imageUrl] : []),
+            ].filter(Boolean);
 
             return (
               <article
@@ -488,24 +504,16 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
                 className="bg-white text-gray-900 rounded-xl overflow-hidden border border-gray-200 flex flex-col justify-between"
               >
                 <div>
-                  <div className="relative h-56 w-full overflow-hidden bg-[#450012] group">
-                    <ResilientImage
-                      src={imgSource}
-                      alt={ev.title}
-                      fallbackTitle={ev.category}
-                      className="w-full h-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => openEditEventModal(ev)}
-                      className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-[#450012]/90 border border-[#D4AF37] text-[#D4AF37] text-xs font-bold hover:bg-[#650019] transition-colors flex items-center gap-1.5 shadow-md cursor-pointer"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      Edit Event & Upload Photo
-                    </button>
-                  </div>
+                  <EventSlidingGallery
+                    images={slideImages.length > 0 ? slideImages : [fallbackImg]}
+                    title={ev.title}
+                    category={ev.category}
+                    heightClass="h-56 sm:h-64"
+                    autoPlayIntervalMs={3800}
+                    onManageSlides={() => onOpenEditMenu('events', ev.id)}
+                  />
+
                   <div className="p-6">
-                    {/* Unboxed metadata line per Zero-Pill Discipline */}
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#650019]">
                         <span>{ev.category}</span>
@@ -515,7 +523,7 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => openEditEventModal(ev)}
+                          onClick={() => onOpenEditMenu('events', ev.id)}
                           className="px-2.5 py-1 rounded-md border border-[#650019]/30 text-xs font-bold text-[#650019] hover:bg-[#650019] hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
@@ -523,7 +531,7 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDeleteEventClick(ev)}
+                          onClick={() => onOpenDeleteMenu('events', ev.id)}
                           className="px-2.5 py-1 rounded-md border border-red-200 text-xs font-bold text-red-700 hover:bg-red-600 hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -601,276 +609,6 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
             );
           })}
         </div>
-
-        {/* Create / Edit Event & Photo Upload Modal */}
-        {showEventModal && (
-          <div
-            className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 overflow-y-auto"
-            onClick={() => setShowEventModal(false)}
-          >
-            <div
-              className="bg-white text-gray-900 rounded-xl max-w-xl w-full overflow-hidden border border-[#D4AF37] my-8"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="bg-[#450012] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/30">
-                <div>
-                  <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold">
-                    BNHS Alumni Activities & Photo Manager
-                  </p>
-                  <h2 className="font-display text-xl font-bold mt-0.5">
-                    {editingEventId ? 'Edit Event & Upload Event Photo' : 'Post Batch or Alumni Event'}
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowEventModal(false)}
-                  className="text-white/70 hover:text-white p-1 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <form
-                onSubmit={handleSaveEventSubmit}
-                className="p-6 space-y-4 max-h-[80vh] overflow-y-auto"
-              >
-                {/* Event Banner Photo Upload (Local File or Google Link) */}
-                <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-[#650019] flex items-center gap-1.5">
-                      <Camera className="w-4 h-4" />
-                      Event Banner Photo ({eventCategory})
-                    </span>
-                    <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-gray-300">
-                      <button
-                        type="button"
-                        onClick={() => setEventPhotoMode('local')}
-                        className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
-                          eventPhotoMode === 'local'
-                            ? 'bg-[#650019] text-white'
-                            : 'text-gray-700'
-                        }`}
-                      >
-                        Upload Local File
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEventPhotoMode('link')}
-                        className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
-                          eventPhotoMode === 'link'
-                            ? 'bg-[#650019] text-white'
-                            : 'text-gray-700'
-                        }`}
-                      >
-                        Google / Web Link
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Live Banner Preview */}
-                  <div className="h-40 w-full rounded-lg overflow-hidden bg-[#450012] border border-[#D4AF37]/50">
-                    <ResilientImage
-                      src={eventImageUrl || BNHS_ASSETS.homecomingEvent}
-                      alt="Event Banner Preview"
-                      fallbackTitle={eventCategory}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-
-                  {eventPhotoMode === 'local' ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        ref={eventFileInputRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={handleEventPhotoFileSelect}
-                        className="hidden"
-                        id="event-photo-file-input"
-                      />
-                      <label
-                        htmlFor="event-photo-file-input"
-                        className="px-4 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-[#D4AF37]" />
-                        {uploadingEventPhoto ? 'Processing Image...' : 'Choose Local Event Photo'}
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setEventImageUrl(BNHS_ASSETS.homecomingEvent)}
-                        className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-100 inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Reset Default Banner
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <input
-                        type="url"
-                        value={eventPhotoLink ?? ''}
-                        onChange={(e) => {
-                          setEventPhotoLink(e.target.value);
-                          setEventImageUrl(normalizeImageUrl(e.target.value));
-                        }}
-                        placeholder="Paste Google Drive link or image URL for this event..."
-                        className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-xs"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setEventImageUrl(normalizeImageUrl(eventPhotoLink))}
-                        className="px-3.5 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Link2 className="w-3.5 h-3.5" />
-                        Apply
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Event Title (5–140 chars) *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={5}
-                    maxLength={140}
-                    value={eventTitle ?? ''}
-                    onChange={(e) => setEventTitle(e.target.value)}
-                    placeholder="e.g., 56th Grand Alumni Homecoming Gala: Eagles Soar Home"
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                      Event Category *
-                    </label>
-                    <select
-                      value={eventCategory ?? 'Homecoming'}
-                      onChange={(e) => setEventCategory(e.target.value as EventCategory)}
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    >
-                      {ALLOWED_EVENT_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                      Date & Time *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      minLength={4}
-                      maxLength={50}
-                      value={eventDate ?? ''}
-                      onChange={(e) => setEventDate(e.target.value)}
-                      placeholder="e.g., April 10, 2027 · 2:00 PM"
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                      Status *
-                    </label>
-                    <select
-                      value={eventStatus ?? 'upcoming'}
-                      onChange={(e) =>
-                        setEventStatus(
-                          e.target.value as 'upcoming' | 'ongoing' | 'completed'
-                        )
-                      }
-                      className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                    >
-                      <option value="upcoming">Upcoming</option>
-                      <option value="ongoing">Ongoing</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Venue / Location *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={3}
-                    maxLength={140}
-                    value={eventVenue ?? ''}
-                    onChange={(e) => setEventVenue(e.target.value)}
-                    placeholder="e.g., BNHS Covered Court, Poblacion, Barobo"
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Event Description & Agenda (10–1000 chars) *
-                  </label>
-                  <textarea
-                    rows={4}
-                    required
-                    minLength={10}
-                    maxLength={1000}
-                    value={eventDesc ?? ''}
-                    onChange={(e) => setEventDesc(e.target.value)}
-                    placeholder="Describe the program schedule, batch coordinator details, and registration instructions..."
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div className="pt-3 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
-                  {editingEventId ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const targetEv = events.find((e) => e.id === editingEventId);
-                        if (targetEv) handleDeleteEventClick(targetEv);
-                      }}
-                      className="px-4 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-bold hover:bg-red-600 hover:text-white transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Delete Event
-                    </button>
-                  ) : (
-                    <div />
-                  )}
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowEventModal(false)}
-                      className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={savingEvent}
-                      className="px-5 py-2 rounded-lg bg-[#650019] text-white text-xs font-semibold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Save className="w-3.5 h-3.5 text-[#D4AF37]" />
-                      {savingEvent
-                        ? 'Saving Event...'
-                        : editingEventId
-                        ? 'Save Event & Photo Changes'
-                        : 'Publish Event'}
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </section>
     );
   }
@@ -895,14 +633,24 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
               Official communications from the BNHS Office of the Principal, Alumni Federation Board, Scholarship Committee, and Batch Chapters.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={openCreateAnnModal}
-            className="px-5 py-3 rounded-lg bg-[#D4AF37] text-[#450012] font-semibold text-sm hover:bg-[#e3c14d] transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Megaphone className="w-4 h-4" />
-            Publish Bulletin
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => onOpenEditMenu('announcements', 'NEW')}
+              className="px-4 py-2.5 rounded-lg bg-[#D4AF37] text-[#450012] font-bold text-xs sm:text-sm hover:bg-[#e3c14d] transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
+            >
+              <Megaphone className="w-4 h-4" />
+              Publish / Edit Bulletin
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenDeleteMenu('announcements', null)}
+              className="px-4 py-2.5 rounded-lg bg-[#650019] border border-red-400/50 text-white font-bold text-xs sm:text-sm hover:bg-red-700 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete Bulletins
+            </button>
+          </div>
         </div>
 
         <div className="mt-6 pt-6 border-t border-white/15 flex flex-wrap items-center gap-1.5">
@@ -968,7 +716,7 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => openEditAnnModal(ann)}
+                  onClick={() => onOpenEditMenu('announcements', ann.id)}
                   className="px-2.5 py-1 rounded-md border border-[#650019]/30 text-xs font-bold text-[#650019] hover:bg-[#650019] hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer"
                 >
                   <Edit3 className="w-3 h-3" />
@@ -976,7 +724,7 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDeleteAnnouncementClick(ann)}
+                  onClick={() => onOpenDeleteMenu('announcements', ann.id)}
                   className="px-2.5 py-1 rounded-md border border-red-200 text-xs font-bold text-red-700 hover:bg-red-600 hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer"
                 >
                   <Trash2 className="w-3 h-3" />
@@ -1055,22 +803,26 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
                   <button
                     type="button"
                     onClick={() => {
-                      const target = activeAnnouncement;
+                      const targetId = activeAnnouncement.id;
                       setActiveAnnouncement(null);
-                      openEditAnnModal(target);
+                      onOpenEditMenu('announcements', targetId);
                     }}
                     className="px-4 py-2 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
-                    Edit Bulletin
+                    Edit in Edit Menu
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleDeleteAnnouncementClick(activeAnnouncement)}
+                    onClick={() => {
+                      const targetId = activeAnnouncement.id;
+                      setActiveAnnouncement(null);
+                      onOpenDeleteMenu('announcements', targetId);
+                    }}
                     className="px-4 py-2 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    Delete Bulletin
+                    Delete in Delete Menu
                   </button>
                 </div>
                 <button
@@ -1082,161 +834,6 @@ export const EventsAndAnnouncementsModule: React.FC<EventsAndAnnouncementsProps>
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create / Edit Announcement Modal */}
-      {showCreateAnnModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 overflow-y-auto"
-          onClick={() => setShowCreateAnnModal(false)}
-        >
-          <div
-            className="bg-white text-gray-900 rounded-xl max-w-lg w-full overflow-hidden border border-[#D4AF37]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-[#450012] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/30">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold">
-                  BNHS Alumni Communications
-                </p>
-                <h2 className="font-display text-xl font-bold mt-0.5">
-                  {editingAnnId ? 'Edit Official Announcement' : 'Publish Official Announcement'}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCreateAnnModal(false)}
-                className="text-white/70 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateAnnouncement} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Headline Title (5–150 chars) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={5}
-                  maxLength={150}
-                  value={newAnnTitle ?? ''}
-                  onChange={(e) => setNewAnnTitle(e.target.value)}
-                  placeholder="e.g., Batch 2010 Medical Mission Volunteer Call"
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Category *
-                  </label>
-                  <select
-                    value={newAnnCategory ?? 'Official Bulletin'}
-                    onChange={(e) => setNewAnnCategory(e.target.value as AnnouncementCategory)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    {ALLOWED_ANNOUNCEMENT_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Issuing Office / Author *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={2}
-                    maxLength={100}
-                    value={newAnnAuthor ?? ''}
-                    onChange={(e) => setNewAnnAuthor(e.target.value)}
-                    placeholder={userProfile?.fullName || 'BNHS Alumni Chapter'}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Summary Deck (10–300 chars) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={10}
-                  maxLength={300}
-                  value={newAnnSummary ?? ''}
-                  onChange={(e) => setNewAnnSummary(e.target.value)}
-                  placeholder="Brief 1-sentence overview of the announcement..."
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Full Bulletin Content (20–2000 chars) *
-                </label>
-                <textarea
-                  rows={4}
-                  required
-                  minLength={20}
-                  maxLength={2000}
-                  value={newAnnContent ?? ''}
-                  onChange={(e) => setNewAnnContent(e.target.value)}
-                  placeholder="Write the complete memorandum or announcement details..."
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
-                {editingAnnId ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const targetAnn = announcements.find((a) => a.id === editingAnnId);
-                      if (targetAnn) handleDeleteAnnouncementClick(targetAnn);
-                    }}
-                    className="px-4 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-bold hover:bg-red-600 hover:text-white transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Delete Bulletin
-                  </button>
-                ) : (
-                  <div />
-                )}
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateAnnModal(false)}
-                    className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creatingAnn}
-                    className="px-5 py-2 rounded-lg bg-[#650019] text-white text-xs font-semibold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5 text-[#D4AF37]" />
-                    {creatingAnn
-                      ? 'Saving...'
-                      : editingAnnId
-                      ? 'Save Bulletin Changes'
-                      : 'Publish Bulletin'}
-                  </button>
-                </div>
-              </div>
-            </form>
           </div>
         </div>
       )}

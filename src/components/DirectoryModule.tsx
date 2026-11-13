@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search,
   UserCheck,
@@ -9,24 +9,14 @@ import {
   SlidersHorizontal,
   ArrowUpRight,
   Edit3,
-  Upload,
-  Link2,
-  Save,
   Calendar,
-  CheckCircle2,
   Trash2,
 } from 'lucide-react';
 import { AlumniProfileRecord, PortalSettingsRecord } from '../data/bnhsData';
 import {
-  ALLOWED_INDUSTRY_SECTORS,
   ALLOWED_STRANDS,
-  AlumniStrand,
-  fileToCompressedDataUrl,
   generateDynamicBatchRanges,
   getCurrentMaxGraduationYear,
-  MentorshipRole,
-  normalizeImageUrl,
-  sanitizeString,
 } from '../lib/firebase';
 import { AlumniInsightsSection } from './AlumniInsightsSection';
 
@@ -36,10 +26,9 @@ interface DirectoryModuleProps {
   initialYearFilter?: string;
   initialCityFilter?: string;
   portalSettings: PortalSettingsRecord;
-  onSavePortalSettings: (updates: Partial<PortalSettingsRecord>) => Promise<void>;
-  onSaveAlumnusProfile: (updated: AlumniProfileRecord) => Promise<void>;
-  onDeleteAlumnusProfile: (uid: string, fullName: string) => Promise<void>;
   onNavigateRegister: () => void;
+  onOpenEditMenu: (tab: 'directory' | 'branding', itemId?: string | null) => void;
+  onOpenDeleteMenu: (tab: 'directory', itemId?: string | null) => void;
 }
 
 export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
@@ -48,10 +37,9 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
   initialYearFilter,
   initialCityFilter,
   portalSettings,
-  onSavePortalSettings,
-  onSaveAlumnusProfile,
-  onDeleteAlumnusProfile,
   onNavigateRegister,
+  onOpenEditMenu,
+  onOpenDeleteMenu,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStrand, setSelectedStrand] = useState<string>('ALL');
@@ -61,7 +49,6 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'density'>('grid');
   const [selectedAlumnus, setSelectedAlumnus] = useState<AlumniProfileRecord | null>(null);
 
-  // Automatic batch range state (supports 2020-2026 and auto-creating 2027-2032)
   const hasFutureAlumni = useMemo(
     () => alumniList.some((a) => a.graduationYear >= 2027),
     [alumniList]
@@ -84,39 +71,6 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
     () => generateDynamicBatchRanges(effectiveMaxYear),
     [effectiveMaxYear]
   );
-
-  // Edit Directory Header Modal State
-  const [showEditHeaderModal, setShowEditHeaderModal] = useState(false);
-  const [editKicker, setEditKicker] = useState(portalSettings.directoryKicker || '');
-  const [editTitle, setEditTitle] = useState(portalSettings.directoryTitle || '');
-  const [editDescription, setEditDescription] = useState(portalSettings.directoryDescription || '');
-  const [savingHeader, setSavingHeader] = useState(false);
-  const [directoryFeedback, setDirectoryFeedback] = useState<string | null>(null);
-
-  // Edit Individual Alumnus Modal State
-  const [editingAlumnus, setEditingAlumnus] = useState<AlumniProfileRecord | null>(null);
-  const [alumFullName, setAlumFullName] = useState('');
-  const [alumGradYear, setAlumGradYear] = useState<number>(2026);
-  const [alumStrand, setAlumStrand] = useState<AlumniStrand>('STEM');
-  const [alumSection, setAlumSection] = useState('');
-  const [alumCourse, setAlumCourse] = useState('');
-  const [alumProfession, setAlumProfession] = useState('');
-  const [alumEmployment, setAlumEmployment] = useState('');
-  const [alumCity, setAlumCity] = useState('');
-  const [alumBio, setAlumBio] = useState('');
-  const [alumMentorship, setAlumMentorship] = useState<MentorshipRole>('mentor');
-  const [alumIndustry, setAlumIndustry] = useState('Engineering & Architecture');
-  const [alumPhotoUrl, setAlumPhotoUrl] = useState('');
-  const [alumPhotoMode, setAlumPhotoMode] = useState<'local' | 'link'>('local');
-  const [alumPhotoLink, setAlumPhotoLink] = useState('');
-  const [savingAlumnus, setSavingAlumnus] = useState(false);
-  const alumFileInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    setEditKicker(portalSettings.directoryKicker || '');
-    setEditTitle(portalSettings.directoryTitle || '');
-    setEditDescription(portalSettings.directoryDescription || '');
-  }, [portalSettings]);
 
   useEffect(() => {
     if (initialYearFilter) {
@@ -195,139 +149,15 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
     setSelectedBatchRangeId('ALL');
   };
 
-  const handleSaveDirectoryHeader = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingHeader(true);
-    try {
-      await onSavePortalSettings({
-        directoryKicker: sanitizeString(editKicker, 120),
-        directoryTitle: sanitizeString(editTitle, 140),
-        directoryDescription: sanitizeString(editDescription, 500),
-      });
-      setShowEditHeaderModal(false);
-      setDirectoryFeedback('Directory section header and description updated!');
-    } finally {
-      setSavingHeader(false);
-    }
-  };
-
-  const openEditAlumnusModal = (alumnus: AlumniProfileRecord) => {
-    setEditingAlumnus(alumnus);
-    setAlumFullName(alumnus.fullName || '');
-    setAlumGradYear(alumnus.graduationYear || 2026);
-    setAlumStrand(alumnus.strand || 'STEM');
-    setAlumSection(alumnus.formerSection || '');
-    setAlumCourse(alumnus.course || '');
-    setAlumProfession(alumnus.profession || '');
-    setAlumEmployment(alumnus.currentEmployment || '');
-    setAlumCity(alumnus.locationCity || '');
-    setAlumBio(alumnus.bio || '');
-    setAlumMentorship(alumnus.mentorshipRole || 'mentor');
-    setAlumIndustry(alumnus.industrySector || 'Engineering & Architecture');
-    setAlumPhotoUrl(alumnus.photoUrl || '');
-    setAlumPhotoLink(alumnus.photoUrl?.startsWith('http') ? alumnus.photoUrl : '');
-  };
-
-  const handleDeleteAlumnus = async (alumnus: AlumniProfileRecord) => {
-    await onDeleteAlumnusProfile(alumnus.uid, alumnus.fullName);
-    if (selectedAlumnus?.uid === alumnus.uid) {
-      setSelectedAlumnus(null);
-    }
-    if (editingAlumnus?.uid === alumnus.uid) {
-      setEditingAlumnus(null);
-    }
-    setDirectoryFeedback(`Removed "${alumnus.fullName}" from the BNHS Alumni Directory.`);
-  };
-
-  const handleAlumPhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const dataUrl = await fileToCompressedDataUrl(file, 360, 0.82);
-      setAlumPhotoUrl(dataUrl);
-    } catch (err) {
-      console.error('Failed to process photo:', err);
-    } finally {
-      if (alumFileInputRef.current) {
-        alumFileInputRef.current.value = '';
-      }
-    }
-  };
-
-  const handleSaveAlumnusSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingAlumnus) return;
-
-    setSavingAlumnus(true);
-    try {
-      const finalPhoto =
-        alumPhotoMode === 'link' && alumPhotoLink.trim()
-          ? normalizeImageUrl(alumPhotoLink)
-          : alumPhotoUrl;
-
-      const updatedRecord: AlumniProfileRecord = {
-        ...editingAlumnus,
-        fullName: sanitizeString(alumFullName, 100),
-        graduationYear: Number(alumGradYear),
-        strand: alumStrand,
-        formerSection: sanitizeString(alumSection, 60),
-        course: sanitizeString(alumCourse, 120),
-        profession: sanitizeString(alumProfession, 100),
-        currentEmployment: sanitizeString(alumEmployment, 120),
-        locationCity: sanitizeString(alumCity, 100),
-        bio: sanitizeString(alumBio, 600),
-        mentorshipRole: alumMentorship,
-        industrySector: sanitizeString(alumIndustry, 80),
-        photoUrl: sanitizeString(finalPhoto, 150000),
-        visibility: 'public',
-      };
-
-      await onSaveAlumnusProfile(updatedRecord);
-      setEditingAlumnus(null);
-      if (selectedAlumnus?.uid === updatedRecord.uid) {
-        setSelectedAlumnus(updatedRecord);
-      }
-      setDirectoryFeedback(`Updated alumni directory record for ${updatedRecord.fullName}.`);
-    } finally {
-      setSavingAlumnus(false);
-    }
-  };
-
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      {directoryFeedback && (
-        <div className="mb-6 p-4 rounded-xl bg-[#450012] border border-[#D4AF37] text-white text-sm flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-[#D4AF37] shrink-0" />
-            {directoryFeedback}
-          </span>
-          <button
-            type="button"
-            onClick={() => setDirectoryFeedback(null)}
-            className="text-[#D4AF37] hover:underline text-xs ml-4 cursor-pointer"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Header Banner with Edit Menu */}
+      {/* Header Banner */}
       <div className="bg-[#450012] border border-[#D4AF37]/30 rounded-xl p-6 sm:p-8 mb-8">
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
           <div>
-            <div className="flex flex-wrap items-center gap-3 mb-2">
-              <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold">
-                {portalSettings.directoryKicker}
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowEditHeaderModal(true)}
-                className="px-2.5 py-1 rounded-md bg-[#650019] border border-[#D4AF37]/40 text-[11px] font-bold text-[#D4AF37] hover:bg-black/30 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <Edit3 className="w-3 h-3" />
-                Edit Directory Section Text
-              </button>
-            </div>
+            <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold mb-2">
+              {portalSettings.directoryKicker}
+            </p>
             <h1 className="font-display text-2xl sm:text-4xl font-bold text-white tracking-tight">
               {portalSettings.directoryTitle}
             </h1>
@@ -443,7 +273,7 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
           </div>
         </div>
 
-        {/* Dynamic Auto-Generated Batch Era Filter Controls (e.g. 2020-2026 and 2027-2032) */}
+        {/* Dynamic Auto-Generated Batch Era Filter Controls */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex flex-wrap items-center gap-1.5 bg-[#650019] p-1 rounded-lg border border-white/10">
@@ -560,7 +390,6 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
                 className="bg-white text-gray-900 rounded-xl p-6 border border-gray-200 hover:border-[#D4AF37] transition-all flex flex-col justify-between cursor-pointer group"
               >
                 <div>
-                  {/* Clean unboxed metadata kicker per Zero-Pill Discipline */}
                   <div className="flex items-center justify-between gap-2 text-xs text-gray-500 mb-3">
                     <div className="flex items-center gap-1.5 font-medium text-[#650019]">
                       <span className="font-mono-num font-bold">Batch {alumnus.graduationYear}</span>
@@ -576,7 +405,6 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
                     )}
                   </div>
 
-                  {/* Alumnus Avatar (Photo or Initials) & Primary Name */}
                   <div className="flex items-start gap-3.5 mb-4">
                     <div className="w-12 h-12 rounded-lg overflow-hidden bg-[#650019] text-[#D4AF37] font-display font-bold text-base flex items-center justify-center shrink-0 border border-[#D4AF37]/40">
                       {alumnus.photoUrl ? (
@@ -602,7 +430,6 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
                     </div>
                   </div>
 
-                  {/* Academic & Location Details */}
                   <div className="pt-3 border-t border-gray-100 space-y-1.5 text-xs text-gray-600">
                     <p className="truncate">
                       <span className="font-semibold text-gray-800">Degree/Course:</span>{' '}
@@ -630,7 +457,7 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
                   >
                     <button
                       type="button"
-                      onClick={() => openEditAlumnusModal(alumnus)}
+                      onClick={() => onOpenEditMenu('directory', alumnus.uid)}
                       className="px-2.5 py-1 rounded-md border border-[#650019]/30 text-[#650019] hover:bg-[#650019] hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Edit3 className="w-3 h-3" />
@@ -638,7 +465,7 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteAlumnus(alumnus)}
+                      onClick={() => onOpenDeleteMenu('directory', alumnus.uid)}
                       className="px-2.5 py-1 rounded-md border border-red-200 text-red-700 hover:bg-red-600 hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -662,7 +489,6 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
             className="bg-white text-gray-900 rounded-xl max-w-2xl w-full overflow-hidden border border-[#D4AF37]"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Maroon Modal Header */}
             <div className="bg-[#450012] text-white p-6 sm:p-8 border-b border-[#D4AF37]/40 flex items-start justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 rounded-xl overflow-hidden bg-[#650019] border-2 border-[#D4AF37] text-[#D4AF37] font-display text-xl font-bold flex items-center justify-center shrink-0">
@@ -709,7 +535,6 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
               </button>
             </div>
 
-            {/* White Card Profile Body */}
             <div className="p-6 sm:p-8 space-y-6">
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-gray-50 p-5 rounded-lg border border-gray-200">
                 <div>
@@ -780,19 +605,27 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
                 <div className="flex flex-wrap items-center gap-2.5">
                   <button
                     type="button"
-                    onClick={() => openEditAlumnusModal(selectedAlumnus)}
+                    onClick={() => {
+                      const uid = selectedAlumnus.uid;
+                      setSelectedAlumnus(null);
+                      onOpenEditMenu('directory', uid);
+                    }}
                     className="px-4 py-2.5 bg-[#D4AF37] text-[#450012] text-xs font-bold rounded-lg hover:bg-[#e3c14d] transition-colors inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
-                    Edit Record & Photo
+                    Edit in Edit Menu
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleDeleteAlumnus(selectedAlumnus)}
+                    onClick={() => {
+                      const uid = selectedAlumnus.uid;
+                      setSelectedAlumnus(null);
+                      onOpenDeleteMenu('directory', uid);
+                    }}
                     className="px-4 py-2.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    Delete Record
+                    Delete in Delete Menu
                   </button>
                   <button
                     type="button"
@@ -804,408 +637,6 @@ export const DirectoryModule: React.FC<DirectoryModuleProps> = ({
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 1: Edit Directory Section Text (Heading & Description) */}
-      {showEditHeaderModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 overflow-y-auto"
-          onClick={() => setShowEditHeaderModal(false)}
-        >
-          <div
-            className="bg-white text-gray-900 rounded-xl max-w-lg w-full overflow-hidden border border-[#D4AF37]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-[#450012] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/30">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold">
-                  Directory Administration
-                </p>
-                <h2 className="font-display text-xl font-bold mt-0.5">
-                  Edit Alumni Directory Header
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowEditHeaderModal(false)}
-                className="text-white/70 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveDirectoryHeader} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Registry Kicker Text *
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={3}
-                  maxLength={120}
-                  value={editKicker ?? ''}
-                  onChange={(e) => setEditKicker(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Directory Title *
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={3}
-                  maxLength={140}
-                  value={editTitle ?? ''}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Directory Description *
-                </label>
-                <textarea
-                  rows={4}
-                  required
-                  minLength={10}
-                  maxLength={500}
-                  value={editDescription ?? ''}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-gray-200 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowEditHeaderModal(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingHeader}
-                  className="px-5 py-2 rounded-lg bg-[#650019] text-white text-xs font-semibold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5 text-[#D4AF37]" />
-                  {savingHeader ? 'Saving...' : 'Save Directory Header'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 2: Edit Alumnus Directory Record & Photo */}
-      {editingAlumnus && (
-        <div
-          className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 overflow-y-auto"
-          onClick={() => setEditingAlumnus(null)}
-        >
-          <div
-            className="bg-white text-gray-900 rounded-xl max-w-2xl w-full overflow-hidden border border-[#D4AF37] my-8"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bg-[#450012] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/30">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-[#D4AF37] font-semibold">
-                  BNHS Directory Record Editor
-                </p>
-                <h2 className="font-display text-xl font-bold mt-0.5">
-                  Edit Profile: {editingAlumnus.fullName}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingAlumnus(null)}
-                className="text-white/70 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleSaveAlumnusSubmit}
-              className="p-6 space-y-4 max-h-[80vh] overflow-y-auto"
-            >
-              {/* Photo Upload or Google Link */}
-              <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#650019]">
-                    Alumni Profile Photo (Local Upload or Google Link)
-                  </span>
-                  <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-gray-300">
-                    <button
-                      type="button"
-                      onClick={() => setAlumPhotoMode('local')}
-                      className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
-                        alumPhotoMode === 'local'
-                          ? 'bg-[#650019] text-white'
-                          : 'text-gray-700'
-                      }`}
-                    >
-                      Local File
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAlumPhotoMode('link')}
-                      className={`px-2.5 py-1 rounded text-xs font-bold cursor-pointer ${
-                        alumPhotoMode === 'link'
-                          ? 'bg-[#650019] text-white'
-                          : 'text-gray-700'
-                      }`}
-                    >
-                      Google Link
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-[#650019] border border-[#D4AF37] text-[#D4AF37] font-display font-bold text-lg flex items-center justify-center shrink-0">
-                    {alumPhotoUrl ? (
-                      <img
-                        src={alumPhotoUrl}
-                        alt="Preview"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span>{alumFullName[0]?.toUpperCase() || 'E'}</span>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    {alumPhotoMode === 'local' ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          ref={alumFileInputRef}
-                          type="file"
-                          accept="image/*"
-                          onChange={handleAlumPhotoFileChange}
-                          className="hidden"
-                          id="dir-edit-photo-file"
-                        />
-                        <label
-                          htmlFor="dir-edit-photo-file"
-                          className="px-3.5 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Upload className="w-3.5 h-3.5 text-[#D4AF37]" />
-                          Upload Local Photo
-                        </label>
-                        {alumPhotoUrl && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAlumPhotoUrl('');
-                              setAlumPhotoLink('');
-                            }}
-                            className="px-3 py-2 rounded-lg border border-red-200 text-red-700 text-xs font-semibold cursor-pointer"
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <input
-                          type="url"
-                          value={alumPhotoLink ?? ''}
-                          onChange={(e) => {
-                            setAlumPhotoLink(e.target.value);
-                            setAlumPhotoUrl(normalizeImageUrl(e.target.value));
-                          }}
-                          placeholder="Paste Google Drive or web image link..."
-                          className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-xs"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setAlumPhotoUrl(normalizeImageUrl(alumPhotoLink))}
-                          className="px-3 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold cursor-pointer"
-                        >
-                          <Link2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Full Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={alumFullName ?? ''}
-                    onChange={(e) => setAlumFullName(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Graduation Year (1982–2032) *
-                  </label>
-                  <input
-                    type="number"
-                    min={1982}
-                    max={2035}
-                    required
-                    value={alumGradYear ?? 2026}
-                    onChange={(e) => setAlumGradYear(Number(e.target.value))}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm font-mono-num"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Strand / Curriculum *
-                  </label>
-                  <select
-                    value={alumStrand ?? 'STEM'}
-                    onChange={(e) => setAlumStrand(e.target.value as AlumniStrand)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    {ALLOWED_STRANDS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Former Section *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={alumSection ?? ''}
-                    onChange={(e) => setAlumSection(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Tertiary Degree / Course *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={alumCourse ?? ''}
-                    onChange={(e) => setAlumCourse(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Profession *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={alumProfession ?? ''}
-                    onChange={(e) => setAlumProfession(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Current Employment *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={alumEmployment ?? ''}
-                    onChange={(e) => setAlumEmployment(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Current City & Province *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={alumCity ?? ''}
-                    onChange={(e) => setAlumCity(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Industry Sector *
-                  </label>
-                  <select
-                    value={alumIndustry ?? 'Engineering & Architecture'}
-                    onChange={(e) => setAlumIndustry(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    {ALLOWED_INDUSTRY_SECTORS.map((sec) => (
-                      <option key={sec} value={sec}>
-                        {sec}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Bio / BNHS Legacy Message *
-                  </label>
-                  <textarea
-                    rows={3}
-                    required
-                    value={alumBio ?? ''}
-                    onChange={(e) => setAlumBio(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleDeleteAlumnus(editingAlumnus)}
-                  className="px-4 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-bold hover:bg-red-600 hover:text-white transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Delete Profile
-                </button>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setEditingAlumnus(null)}
-                    className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={savingAlumnus}
-                    className="px-5 py-2 rounded-lg bg-[#650019] text-white text-xs font-semibold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5 text-[#D4AF37]" />
-                    {savingAlumnus ? 'Saving...' : 'Save Alumni Profile'}
-                  </button>
-                </div>
-              </div>
-            </form>
           </div>
         </div>
       )}
