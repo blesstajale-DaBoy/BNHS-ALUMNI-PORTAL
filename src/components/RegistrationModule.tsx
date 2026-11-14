@@ -491,12 +491,13 @@ export const RegistrationModule: React.FC<RegistrationModuleProps> = ({
             {/* Upload or Link Controls */}
             <div className="flex-1 w-full space-y-3">
               {photoInputMode === 'local' ? (
-                <div>
+                <div key="reg-photo-local-panel">
                   <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1.5">
                     Select Photo from Computer or Phone (JPG, PNG, GIF, WEBP)
                   </label>
                   <div className="flex flex-wrap items-center gap-3">
                     <input
+                      key="reg-photo-file-input"
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"
@@ -530,12 +531,13 @@ export const RegistrationModule: React.FC<RegistrationModuleProps> = ({
                   </p>
                 </div>
               ) : (
-                <div>
+                <div key="reg-photo-link-panel">
                   <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1.5">
                     Paste Google Drive Share Link or Direct Image URL
                   </label>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <input
+                      key="reg-photo-url-input"
                       type="url"
                       value={photoLinkInput ?? ''}
                       onChange={(e) => {

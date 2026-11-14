@@ -63,6 +63,8 @@ interface PortalEditMenuModalProps {
   onSaveAlumnusProfile: (profile: AlumniProfileRecord) => Promise<void>;
   onSaveAnnouncement: (ann: AnnouncementRecord, isNew: boolean) => Promise<void>;
   onSaveSpotlight: (story: SpotlightStoryRecord, isNew: boolean) => Promise<void>;
+  isCloudAuthenticated?: boolean;
+  onSyncCloudNow?: () => Promise<void>;
 }
 
 export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
@@ -80,10 +82,24 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
   onSaveAlumnusProfile,
   onSaveAnnouncement,
   onSaveSpotlight,
+  isCloudAuthenticated = false,
+  onSyncCloudNow,
 }) => {
   const [activeTab, setActiveTab] = useState<EditMenuTab>(initialTab);
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+
+  const [showEventSelector, setShowEventSelector] = useState(true);
+  const [showDirSelector, setShowDirSelector] = useState(true);
+  const [showAnnSelector, setShowAnnSelector] = useState(true);
+  const [showSpotSelector, setShowSpotSelector] = useState(true);
+
+  const brandingDirtyRef = useRef(false);
+  const eventDirtyRef = useRef(false);
+  const alumDirtyRef = useRef(false);
+  const annDirtyRef = useRef(false);
+  const spotDirtyRef = useRef(false);
+  const autoSaveLockRef = useRef(false);
 
   // --- TAB 1: BRANDING, HERO, DIRECTORY HEADER, FOOTER & SOCIALS ---
   const [logoUrl, setLogoUrl] = useState(portalSettings.logoUrl || BNHS_ASSETS.eagleCrest);
@@ -135,6 +151,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
   const [evSlideLink, setEvSlideLink] = useState('');
   const [uploadingEvSlide, setUploadingEvSlide] = useState(false);
   const evFileInputRef = useRef<HTMLInputElement | null>(null);
+  const evTitleInputRef = useRef<HTMLInputElement | null>(null);
 
   // --- TAB 3: DIRECTORY PROFILES ---
   const [selectedAlumUid, setSelectedAlumUid] = useState<string>('');
@@ -153,6 +170,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
   const [alumPhotoMode, setAlumPhotoMode] = useState<'local' | 'link'>('local');
   const [alumPhotoLink, setAlumPhotoLink] = useState('');
   const alumFileRef = useRef<HTMLInputElement | null>(null);
+  const alumNameInputRef = useRef<HTMLInputElement | null>(null);
 
   // --- TAB 4: ANNOUNCEMENTS ---
   const [selectedAnnId, setSelectedAnnId] = useState<string>('');
@@ -161,6 +179,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
   const [annAuthor, setAnnAuthor] = useState('');
   const [annSummary, setAnnSummary] = useState('');
   const [annContent, setAnnContent] = useState('');
+  const annTitleInputRef = useRef<HTMLInputElement | null>(null);
 
   // --- TAB 5: SPOTLIGHT MILESTONES ---
   const [selectedSpotId, setSelectedSpotId] = useState<string>('');
@@ -171,8 +190,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
   const [spotNominator, setSpotNominator] = useState('');
   const [spotMilestone, setSpotMilestone] = useState('');
   const [spotStory, setSpotStory] = useState('');
+  const spotNomineeInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadEventIntoForm = (ev: AlumniEventRecord | null) => {
+    eventDirtyRef.current = false;
     if (!ev) {
       setSelectedEventId('NEW');
       setEvTitle('');
@@ -202,6 +223,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
   };
 
   const loadAlumIntoForm = (alum: AlumniProfileRecord | null) => {
+    alumDirtyRef.current = false;
     if (!alum) return;
     setSelectedAlumUid(alum.uid);
     setAlumName(alum.fullName || '');
@@ -220,6 +242,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
   };
 
   const loadAnnIntoForm = (ann: AnnouncementRecord | null) => {
+    annDirtyRef.current = false;
     if (!ann) {
       setSelectedAnnId('NEW');
       setAnnTitle('');
@@ -238,6 +261,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
   };
 
   const loadSpotlightIntoForm = (st: SpotlightStoryRecord | null) => {
+    spotDirtyRef.current = false;
     if (!st) {
       setSelectedSpotId('NEW');
       setSpotNominee('');
@@ -263,6 +287,16 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
     if (!isOpen) return;
     setSaveNotice(null);
     setActiveTab(initialTab);
+    brandingDirtyRef.current = false;
+    eventDirtyRef.current = false;
+    alumDirtyRef.current = false;
+    annDirtyRef.current = false;
+    spotDirtyRef.current = false;
+
+    setShowEventSelector(!(initialTab === 'events' && Boolean(initialItemId)));
+    setShowDirSelector(!(initialTab === 'directory' && Boolean(initialItemId)));
+    setShowAnnSelector(!(initialTab === 'announcements' && Boolean(initialItemId)));
+    setShowSpotSelector(!(initialTab === 'spotlights' && Boolean(initialItemId)));
 
     // Hydrate Branding fields
     setLogoUrl(portalSettings.logoUrl || BNHS_ASSETS.eagleCrest);
@@ -316,38 +350,19 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
     loadSpotlightIntoForm(
       initialTab === 'spotlights' && initialItemId === 'NEW' ? null : targetSpot
     );
+
+    const focusTimer = window.setTimeout(() => {
+      if (initialTab === 'events') evTitleInputRef.current?.focus();
+      else if (initialTab === 'directory') alumNameInputRef.current?.focus();
+      else if (initialTab === 'announcements') annTitleInputRef.current?.focus();
+      else if (initialTab === 'spotlights') spotNomineeInputRef.current?.focus();
+    }, 80);
+    return () => window.clearTimeout(focusTimer);
   }, [isOpen, initialTab, initialItemId]);
 
-  if (!isOpen) return null;
-
-  const maxYear = getCurrentMaxGraduationYear();
-  const yearsList = Array.from({ length: maxYear - 1982 + 1 }, (_, i) => maxYear - i);
-
-  // Handlers for Branding uploads
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const dataUrl = await fileToCompressedDataUrl(file, 360, 0.85);
-      setLogoUrl(dataUrl);
-    } finally {
-      if (logoInputRef.current) logoInputRef.current.value = '';
-    }
-  };
-
-  const handleHeroUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const dataUrl = await fileToCompressedDataUrl(file, 720, 0.8);
-      setHeroImageUrl(dataUrl);
-    } finally {
-      if (heroInputRef.current) heroInputRef.current.value = '';
-    }
-  };
-
-  const handleSaveBrandingSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const persistBrandingNow = async (showBanner: boolean) => {
+    if (autoSaveLockRef.current) return;
+    autoSaveLockRef.current = true;
     setSaving(true);
     try {
       const finalLogo =
@@ -359,6 +374,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
           ? normalizeImageUrl(heroLink)
           : heroImageUrl || BNHS_ASSETS.campusHero;
 
+      brandingDirtyRef.current = false;
       await onSavePortalSettings({
         logoUrl: finalLogo,
         logoAnimated,
@@ -379,43 +395,20 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         twitterUrl: twitterUrl.trim(),
         linkedinUrl: linkedinUrl.trim(),
       });
-      setSaveNotice(
-        'Cloud Synced (Auto-Saved): Portal Logo, Hero Picture, Captions, Directory Header, Footer & Social Links.'
-      );
+      if (showBanner) {
+        setSaveNotice(
+          isCloudAuthenticated
+            ? 'Cloud Synced (Auto-Saved): Portal Logo, Hero Picture, Captions, Directory Header, Footer & Social Links.'
+            : 'Auto-Saved Locally: Portal settings updated. Sign in with Google to push live to Published.'
+        );
+      }
     } finally {
+      autoSaveLockRef.current = false;
       setSaving(false);
     }
   };
 
-  // Handlers for Event Sliding Gallery uploads
-  const handleEventSlidesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    setUploadingEvSlide(true);
-    try {
-      const newUrls: string[] = [];
-      for (let i = 0; i < files.length && evSlides.length + newUrls.length < 10; i++) {
-        const compressed = await fileToCompressedDataUrl(files[i], 560, 0.72);
-        newUrls.push(compressed);
-      }
-      if (newUrls.length > 0) {
-        setEvSlides((prev) => [...prev, ...newUrls].slice(0, 10));
-      }
-    } finally {
-      setUploadingEvSlide(false);
-      if (evFileInputRef.current) evFileInputRef.current.value = '';
-    }
-  };
-
-  const handleAddEventSlideLink = () => {
-    const norm = normalizeImageUrl(evSlideLink);
-    if (!norm) return;
-    setEvSlides((prev) => Array.from(new Set([...prev, norm])).slice(0, 10));
-    setEvSlideLink('');
-  };
-
-  const handleSaveEventSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const persistEventNow = async (showBanner: boolean) => {
     const cleanTitle = sanitizeString(evTitle, 140);
     const cleanDate = sanitizeString(evDate, 50);
     const cleanVenue = sanitizeString(evVenue, 140);
@@ -424,11 +417,13 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
       cleanTitle.length < 5 ||
       cleanDate.length < 4 ||
       cleanVenue.length < 3 ||
-      cleanDesc.length < 10
+      cleanDesc.length < 10 ||
+      autoSaveLockRef.current
     ) {
       return;
     }
 
+    autoSaveLockRef.current = true;
     setSaving(true);
     try {
       const isNew = selectedEventId === 'NEW' || !selectedEventId;
@@ -438,6 +433,11 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         0,
         10
       );
+
+      eventDirtyRef.current = false;
+      if (isNew) {
+        setSelectedEventId(targetId);
+      }
 
       const record: AlumniEventRecord = {
         id: targetId,
@@ -453,31 +453,23 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         galleryUrls: validSlides,
       };
       await onSaveEvent(record, isNew);
-      setSelectedEventId(targetId);
-      setSaveNotice(
-        `Cloud Synced (Auto-Saved): ${evCategory} event "${cleanTitle}" with ${validSlides.length} sliding photo(s).`
-      );
+      if (showBanner) {
+        setSaveNotice(
+          isCloudAuthenticated
+            ? `Cloud Synced (Auto-Saved): ${evCategory} event "${cleanTitle}" with ${validSlides.length} sliding photo(s).`
+            : `Auto-Saved Locally: ${evCategory} event "${cleanTitle}". Sign in with Google to push live to Published.`
+        );
+      }
     } finally {
+      autoSaveLockRef.current = false;
       setSaving(false);
     }
   };
 
-  // Handlers for Alumni Profile editing
-  const handleAlumPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const dataUrl = await fileToCompressedDataUrl(file, 360, 0.82);
-      setAlumPhotoUrl(dataUrl);
-    } finally {
-      if (alumFileRef.current) alumFileRef.current.value = '';
-    }
-  };
-
-  const handleSaveAlumSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const persistAlumNow = async (showBanner: boolean) => {
     const existing = alumniList.find((a) => a.uid === selectedAlumUid);
-    if (!existing) return;
+    if (!existing || sanitizeString(alumName, 100).length < 2 || autoSaveLockRef.current) return;
+    autoSaveLockRef.current = true;
     setSaving(true);
     try {
       const finalPhoto =
@@ -485,6 +477,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
           ? normalizeImageUrl(alumPhotoLink)
           : alumPhotoUrl;
 
+      alumDirtyRef.current = false;
       const updated: AlumniProfileRecord = {
         ...existing,
         fullName: sanitizeString(alumName, 100),
@@ -502,26 +495,44 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         visibility: 'public',
       };
       await onSaveAlumnusProfile(updated);
-      setSaveNotice(`Cloud Synced (Auto-Saved): Directory Profile for ${updated.fullName}.`);
+      if (showBanner) {
+        setSaveNotice(
+          isCloudAuthenticated
+            ? `Cloud Synced (Auto-Saved): Directory Profile for ${updated.fullName}.`
+            : `Auto-Saved Locally: Directory Profile for ${updated.fullName}.`
+        );
+      }
     } finally {
+      autoSaveLockRef.current = false;
       setSaving(false);
     }
   };
 
-  // Handlers for Announcements
-  const handleSaveAnnSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const persistAnnNow = async (showBanner: boolean) => {
     const cleanTitle = sanitizeString(annTitle, 150);
     const cleanAuthor = sanitizeString(annAuthor || 'BNHS Alumni Federation', 100);
     const cleanSummary = sanitizeString(annSummary, 300);
     const cleanContent = sanitizeString(annContent, 2000);
-    if (cleanTitle.length < 5 || cleanSummary.length < 10 || cleanContent.length < 20) return;
+    if (
+      cleanTitle.length < 5 ||
+      cleanSummary.length < 10 ||
+      cleanContent.length < 20 ||
+      autoSaveLockRef.current
+    ) {
+      return;
+    }
 
+    autoSaveLockRef.current = true;
     setSaving(true);
     try {
       const isNew = selectedAnnId === 'NEW' || !selectedAnnId;
       const targetId = isNew ? sanitizeId(`ann_${Date.now()}`) : selectedAnnId;
       const existing = announcements.find((a) => a.id === targetId);
+      annDirtyRef.current = false;
+      if (isNew) {
+        setSelectedAnnId(targetId);
+      }
+
       const record: AnnouncementRecord = {
         id: targetId,
         authorId: existing?.authorId || 'system_bnhs_admin',
@@ -535,16 +546,20 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         publishedLabel: existing?.publishedLabel || 'Verified Portal Release',
       };
       await onSaveAnnouncement(record, isNew);
-      setSelectedAnnId(targetId);
-      setSaveNotice(`Cloud Synced (Auto-Saved): Official Announcement "${cleanTitle}".`);
+      if (showBanner) {
+        setSaveNotice(
+          isCloudAuthenticated
+            ? `Cloud Synced (Auto-Saved): Official Announcement "${cleanTitle}".`
+            : `Auto-Saved Locally: Official Announcement "${cleanTitle}".`
+        );
+      }
     } finally {
+      autoSaveLockRef.current = false;
       setSaving(false);
     }
   };
 
-  // Handlers for Spotlight Milestones
-  const handleSaveSpotlightSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const persistSpotlightNow = async (showBanner: boolean) => {
     const cleanNominee = sanitizeString(spotNominee, 100);
     const cleanProfession = sanitizeString(spotProfession, 100);
     const cleanMilestone = sanitizeString(spotMilestone, 140);
@@ -554,16 +569,23 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
       cleanNominee.length < 2 ||
       cleanProfession.length < 2 ||
       cleanMilestone.length < 5 ||
-      cleanStory.length < 15
+      cleanStory.length < 15 ||
+      autoSaveLockRef.current
     ) {
       return;
     }
 
+    autoSaveLockRef.current = true;
     setSaving(true);
     try {
       const isNew = selectedSpotId === 'NEW' || !selectedSpotId;
       const targetId = isNew ? sanitizeId(`spot_${Date.now()}`) : selectedSpotId;
       const existing = spotlights.find((s) => s.id === targetId);
+      spotDirtyRef.current = false;
+      if (isNew) {
+        setSelectedSpotId(targetId);
+      }
+
       const record: SpotlightStoryRecord = {
         id: targetId,
         nominatorUid: existing?.nominatorUid || 'system_bnhs_admin',
@@ -577,11 +599,211 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         visibility: 'public',
       };
       await onSaveSpotlight(record, isNew);
-      setSelectedSpotId(targetId);
-      setSaveNotice(`Cloud Synced (Auto-Saved): Spotlight Milestone for ${cleanNominee}.`);
+      if (showBanner) {
+        setSaveNotice(
+          isCloudAuthenticated
+            ? `Cloud Synced (Auto-Saved): Spotlight Milestone for ${cleanNominee}.`
+            : `Auto-Saved Locally: Spotlight Milestone for ${cleanNominee}.`
+        );
+      }
     } finally {
+      autoSaveLockRef.current = false;
       setSaving(false);
     }
+  };
+
+  // Real-Time Debounced Auto-Save Effects (550ms after any edit in any tab)
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'branding' || !brandingDirtyRef.current) return;
+    const t = window.setTimeout(() => {
+      void persistBrandingNow(false);
+    }, 550);
+    return () => window.clearTimeout(t);
+  }, [
+    isOpen,
+    activeTab,
+    logoUrl,
+    logoMode,
+    logoLink,
+    logoAnimated,
+    heroImageUrl,
+    heroMode,
+    heroLink,
+    schoolKicker,
+    portalSubtitle,
+    welcomeTitle,
+    mottoText,
+    welcomeDesc,
+    heroCaptionLocation,
+    heroCaptionTitle,
+    heroCaptionDesc,
+    directoryKicker,
+    directoryTitle,
+    directoryDesc,
+    footerSubtitle,
+    facebookUrl,
+    twitterUrl,
+    linkedinUrl,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'events' || !eventDirtyRef.current) return;
+    const t = window.setTimeout(() => {
+      void persistEventNow(false);
+    }, 550);
+    return () => window.clearTimeout(t);
+  }, [isOpen, activeTab, selectedEventId, evTitle, evCategory, evDate, evVenue, evStatus, evDesc, evSlides]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'directory' || !alumDirtyRef.current) return;
+    const t = window.setTimeout(() => {
+      void persistAlumNow(false);
+    }, 550);
+    return () => window.clearTimeout(t);
+  }, [
+    isOpen,
+    activeTab,
+    selectedAlumUid,
+    alumName,
+    alumYear,
+    alumStrand,
+    alumSection,
+    alumCourse,
+    alumProfession,
+    alumEmployment,
+    alumCity,
+    alumIndustry,
+    alumMentorship,
+    alumBio,
+    alumPhotoUrl,
+    alumPhotoMode,
+    alumPhotoLink,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'announcements' || !annDirtyRef.current) return;
+    const t = window.setTimeout(() => {
+      void persistAnnNow(false);
+    }, 550);
+    return () => window.clearTimeout(t);
+  }, [isOpen, activeTab, selectedAnnId, annTitle, annCategory, annAuthor, annSummary, annContent]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'spotlights' || !spotDirtyRef.current) return;
+    const t = window.setTimeout(() => {
+      void persistSpotlightNow(false);
+    }, 550);
+    return () => window.clearTimeout(t);
+  }, [
+    isOpen,
+    activeTab,
+    selectedSpotId,
+    spotNominee,
+    spotYear,
+    spotStrand,
+    spotProfession,
+    spotNominator,
+    spotMilestone,
+    spotStory,
+  ]);
+
+  if (!isOpen) return null;
+
+  const maxYear = getCurrentMaxGraduationYear();
+  const yearsList = Array.from({ length: maxYear - 1982 + 1 }, (_, i) => maxYear - i);
+
+  // Handlers for Branding uploads
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file, 360, 0.85);
+      brandingDirtyRef.current = true;
+      setLogoUrl(dataUrl);
+    } finally {
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleHeroUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file, 720, 0.8);
+      brandingDirtyRef.current = true;
+      setHeroImageUrl(dataUrl);
+    } finally {
+      if (heroInputRef.current) heroInputRef.current.value = '';
+    }
+  };
+
+  const handleSaveBrandingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await persistBrandingNow(true);
+  };
+
+  // Handlers for Event Sliding Gallery uploads
+  const handleEventSlidesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploadingEvSlide(true);
+    try {
+      const newUrls: string[] = [];
+      for (let i = 0; i < files.length && evSlides.length + newUrls.length < 10; i++) {
+        const compressed = await fileToCompressedDataUrl(files[i], 480, 0.72);
+        newUrls.push(compressed);
+      }
+      if (newUrls.length > 0) {
+        eventDirtyRef.current = true;
+        setEvSlides((prev) => [...prev, ...newUrls].slice(0, 10));
+      }
+    } finally {
+      setUploadingEvSlide(false);
+      if (evFileInputRef.current) evFileInputRef.current.value = '';
+    }
+  };
+
+  const handleAddEventSlideLink = () => {
+    const norm = normalizeImageUrl(evSlideLink);
+    if (!norm) return;
+    eventDirtyRef.current = true;
+    setEvSlides((prev) => Array.from(new Set([...prev, norm])).slice(0, 10));
+    setEvSlideLink('');
+  };
+
+  const handleSaveEventSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await persistEventNow(true);
+  };
+
+  // Handlers for Alumni Profile editing
+  const handleAlumPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file, 360, 0.82);
+      alumDirtyRef.current = true;
+      setAlumPhotoUrl(dataUrl);
+    } finally {
+      if (alumFileRef.current) alumFileRef.current.value = '';
+    }
+  };
+
+  const handleSaveAlumSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await persistAlumNow(true);
+  };
+
+  // Handlers for Announcements
+  const handleSaveAnnSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await persistAnnNow(true);
+  };
+
+  // Handlers for Spotlight Milestones
+  const handleSaveSpotlightSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await persistSpotlightNow(true);
   };
 
   return (
@@ -601,14 +823,26 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                 <Edit3 className="w-3.5 h-3.5" />
                 <span>Unified BNHS Portal Edit Menu</span>
               </p>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-400/50 text-[10px] font-bold text-emerald-200">
-                {saving ? (
+              {saving ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-400/50 text-[10px] font-bold text-emerald-200">
                   <Cloud className="w-3 h-3 text-[#D4AF37] animate-pulse" />
-                ) : (
+                  <span>Cloud Syncing (Auto-Saving)...</span>
+                </span>
+              ) : isCloudAuthenticated ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-400/50 text-[10px] font-bold text-emerald-200">
                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                )}
-                <span>{saving ? 'Cloud Syncing (Auto-Saving)...' : 'Cloud Synced (Auto-Saved)'}</span>
-              </span>
+                  <span>Cloud Synced (Auto-Saved) · Live on Preview & Published</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void onSyncCloudNow?.()}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-950/85 border border-[#D4AF37]/70 text-[10px] font-bold text-[#D4AF37] hover:bg-amber-900 cursor-pointer"
+                >
+                  <Cloud className="w-3 h-3" />
+                  <span>Auto-Saved Locally · Click to Sync Live</span>
+                </button>
+              )}
             </div>
             <h2 className="font-display text-lg sm:text-2xl font-bold mt-1">
               Edit Portal Branding, Events, Directory, Announcements & Spotlight
@@ -677,7 +911,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
         <div className="p-4 sm:p-6 overflow-y-auto flex-1">
           {/* TAB 1: BRANDING, HERO, CAPTIONS, DIRECTORY HEADER, FOOTER & SOCIALS */}
           {activeTab === 'branding' && (
-            <form onSubmit={handleSaveBrandingSubmit} className="space-y-6">
+            <form key="tab-form-branding" onSubmit={handleSaveBrandingSubmit} className="space-y-6">
               {/* School Animated GIF Logo */}
               <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -686,7 +920,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       1. School Logo (Animated GIF / Image)
                     </h3>
                     <p className="text-xs text-gray-500">
-                      Upload a local GIF/image or paste a Google link.
+                      Upload a local GIF/image or paste a Google link — auto-saves automatically.
                     </p>
                   </div>
                   <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-gray-300">
@@ -725,8 +959,9 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   </div>
                   <div className="flex-1 w-full space-y-2">
                     {logoMode === 'local' ? (
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div key="branding-logo-local" className="flex flex-wrap items-center gap-2">
                         <input
+                          key="branding-logo-file-input"
                           ref={logoInputRef}
                           type="file"
                           accept="image/*,.gif"
@@ -744,6 +979,7 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                         <button
                           type="button"
                           onClick={() => {
+                            brandingDirtyRef.current = true;
                             setLogoUrl(BNHS_ASSETS.eagleCrest);
                             setLogoAnimated(true);
                           }}
@@ -753,11 +989,13 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                         </button>
                       </div>
                     ) : (
-                      <div className="flex gap-2">
+                      <div key="branding-logo-link" className="flex gap-2">
                         <input
+                          key="branding-logo-url-input"
                           type="url"
                           value={logoLink ?? ''}
                           onChange={(e) => {
+                            brandingDirtyRef.current = true;
                             setLogoLink(e.target.value);
                             setLogoUrl(normalizeImageUrl(e.target.value));
                           }}
@@ -766,7 +1004,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                         />
                         <button
                           type="button"
-                          onClick={() => setLogoUrl(normalizeImageUrl(logoLink))}
+                          onClick={() => {
+                            brandingDirtyRef.current = true;
+                            setLogoUrl(normalizeImageUrl(logoLink));
+                          }}
                           className="px-3 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold cursor-pointer"
                         >
                           <Link2 className="w-3.5 h-3.5" />
@@ -777,7 +1018,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       <input
                         type="checkbox"
                         checked={Boolean(logoAnimated)}
-                        onChange={(e) => setLogoAnimated(e.target.checked)}
+                        onChange={(e) => {
+                          brandingDirtyRef.current = true;
+                          setLogoAnimated(e.target.checked);
+                        }}
                         className="accent-[#650019]"
                       />
                       <span>Enable Animated GIF Pulse & Glow Effect</span>
@@ -821,8 +1065,9 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                 </div>
 
                 {heroMode === 'local' ? (
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div key="branding-hero-local" className="flex flex-wrap items-center gap-2">
                     <input
+                      key="branding-hero-file-input"
                       ref={heroInputRef}
                       type="file"
                       accept="image/*"
@@ -839,18 +1084,23 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     </label>
                     <button
                       type="button"
-                      onClick={() => setHeroImageUrl(BNHS_ASSETS.campusHero)}
+                      onClick={() => {
+                        brandingDirtyRef.current = true;
+                        setHeroImageUrl(BNHS_ASSETS.campusHero);
+                      }}
                       className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100 cursor-pointer"
                     >
                       Restore Default Photo
                     </button>
                   </div>
                 ) : (
-                  <div className="flex gap-2">
+                  <div key="branding-hero-link" className="flex gap-2">
                     <input
+                      key="branding-hero-url-input"
                       type="url"
                       value={heroLink ?? ''}
                       onChange={(e) => {
+                        brandingDirtyRef.current = true;
                         setHeroLink(e.target.value);
                         setHeroImageUrl(normalizeImageUrl(e.target.value));
                       }}
@@ -859,7 +1109,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     />
                     <button
                       type="button"
-                      onClick={() => setHeroImageUrl(normalizeImageUrl(heroLink))}
+                      onClick={() => {
+                        brandingDirtyRef.current = true;
+                        setHeroImageUrl(normalizeImageUrl(heroLink));
+                      }}
                       className="px-3 py-2 rounded-lg bg-[#650019] text-white text-xs font-bold cursor-pointer"
                     >
                       Apply
@@ -883,7 +1136,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       type="text"
                       required
                       value={schoolKicker ?? ''}
-                      onChange={(e) => setSchoolKicker(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setSchoolKicker(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                     />
                   </div>
@@ -895,7 +1151,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       type="text"
                       required
                       value={portalSubtitle ?? ''}
-                      onChange={(e) => setPortalSubtitle(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setPortalSubtitle(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                     />
                   </div>
@@ -907,7 +1166,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       type="text"
                       required
                       value={welcomeTitle ?? ''}
-                      onChange={(e) => setWelcomeTitle(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setWelcomeTitle(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-bold"
                     />
                   </div>
@@ -919,7 +1181,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       type="text"
                       required
                       value={mottoText ?? ''}
-                      onChange={(e) => setMottoText(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setMottoText(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold text-[#650019]"
                     />
                   </div>
@@ -933,7 +1198,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     rows={2}
                     required
                     value={welcomeDesc ?? ''}
-                    onChange={(e) => setWelcomeDesc(e.target.value)}
+                    onChange={(e) => {
+                      brandingDirtyRef.current = true;
+                      setWelcomeDesc(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -947,7 +1215,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       type="text"
                       required
                       value={heroCaptionLocation ?? ''}
-                      onChange={(e) => setHeroCaptionLocation(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setHeroCaptionLocation(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                     />
                   </div>
@@ -959,7 +1230,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       type="text"
                       required
                       value={heroCaptionTitle ?? ''}
-                      onChange={(e) => setHeroCaptionTitle(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setHeroCaptionTitle(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                     />
                   </div>
@@ -973,7 +1247,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     rows={2}
                     required
                     value={heroCaptionDesc ?? ''}
-                    onChange={(e) => setHeroCaptionDesc(e.target.value)}
+                    onChange={(e) => {
+                      brandingDirtyRef.current = true;
+                      setHeroCaptionDesc(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -987,7 +1264,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       type="text"
                       required
                       value={directoryKicker ?? ''}
-                      onChange={(e) => setDirectoryKicker(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setDirectoryKicker(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                     />
                   </div>
@@ -999,7 +1279,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       type="text"
                       required
                       value={directoryTitle ?? ''}
-                      onChange={(e) => setDirectoryTitle(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setDirectoryTitle(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-bold"
                     />
                   </div>
@@ -1013,7 +1296,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     rows={2}
                     required
                     value={directoryDesc ?? ''}
-                    onChange={(e) => setDirectoryDesc(e.target.value)}
+                    onChange={(e) => {
+                      brandingDirtyRef.current = true;
+                      setDirectoryDesc(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1026,7 +1312,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     type="text"
                     required
                     value={footerSubtitle ?? ''}
-                    onChange={(e) => setFooterSubtitle(e.target.value)}
+                    onChange={(e) => {
+                      brandingDirtyRef.current = true;
+                      setFooterSubtitle(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1045,7 +1334,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     <input
                       type="url"
                       value={facebookUrl ?? ''}
-                      onChange={(e) => setFacebookUrl(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setFacebookUrl(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs"
                     />
                   </div>
@@ -1056,7 +1348,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     <input
                       type="url"
                       value={twitterUrl ?? ''}
-                      onChange={(e) => setTwitterUrl(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setTwitterUrl(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs"
                     />
                   </div>
@@ -1067,21 +1362,27 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     <input
                       type="url"
                       value={linkedinUrl ?? ''}
-                      onChange={(e) => setLinkedinUrl(e.target.value)}
+                      onChange={(e) => {
+                        brandingDirtyRef.current = true;
+                        setLinkedinUrl(e.target.value);
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-gray-200 flex items-center justify-end gap-3">
+              <div className="pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-emerald-700 font-semibold">
+                  Changes auto-save automatically as you edit.
+                </span>
                 <button
                   type="submit"
                   disabled={saving}
                   className="px-5 py-2.5 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Save className="w-4 h-4 text-[#D4AF37]" />
-                  {saving ? 'Auto-Syncing...' : 'Save & Auto-Sync Portal Settings'}
+                  {saving ? 'Auto-Syncing...' : 'Save & Done'}
                 </button>
               </div>
             </form>
@@ -1089,41 +1390,207 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
 
           {/* TAB 2: EVENTS & SLIDING PICTURES */}
           {activeTab === 'events' && (
-            <form onSubmit={handleSaveEventSubmit} className="space-y-5">
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200">
-                <div className="flex-1 min-w-[220px]">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1">
-                    Select Event to Edit (Homecoming, Batch Reunion, Career Mentorship, Scholarship Drive, Community Outreach)
-                  </label>
-                  <select
-                    value={selectedEventId ?? ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === 'NEW') {
-                        loadEventIntoForm(null);
-                      } else {
-                        const found = events.find((ev) => ev.id === val) || null;
-                        loadEventIntoForm(found);
-                      }
+            <form key="tab-form-events" onSubmit={handleSaveEventSubmit} className="space-y-5">
+              {showEventSelector ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200">
+                  <div className="flex-1 min-w-[220px]">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1">
+                      Select Event to Edit (Homecoming, Batch Reunion, Career Mentorship, Scholarship Drive, Community Outreach)
+                    </label>
+                    <select
+                      value={selectedEventId ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'NEW') {
+                          loadEventIntoForm(null);
+                        } else {
+                          const found = events.find((ev) => ev.id === val) || null;
+                          loadEventIntoForm(found);
+                        }
+                        window.setTimeout(() => evTitleInputRef.current?.focus(), 40);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold"
+                    >
+                      {events.map((ev) => (
+                        <option key={ev.id} value={ev.id}>
+                          [{ev.category}] {ev.title}
+                        </option>
+                      ))}
+                      <option value="NEW">+ Create New Event</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      loadEventIntoForm(null);
+                      setShowEventSelector(false);
+                      window.setTimeout(() => evTitleInputRef.current?.focus(), 40);
                     }}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold"
+                    className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
-                    {events.map((ev) => (
-                      <option key={ev.id} value={ev.id}>
-                        [{ev.category}] {ev.title}
-                      </option>
-                    ))}
-                    <option value="NEW">+ Create New Event</option>
-                  </select>
+                    <Plus className="w-3.5 h-3.5" />
+                    New Event
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => loadEventIntoForm(null)}
-                  className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  New Event
-                </button>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-[#450012]/5 border border-[#D4AF37]/50 px-3.5 py-2.5 rounded-xl">
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-[#650019]">
+                      Direct Event Text & Sliding Photos Editor
+                    </p>
+                    <p className="text-xs font-bold text-gray-900 truncate">
+                      {selectedEventId === 'NEW'
+                        ? 'Creating New Event'
+                        : `Editing: ${evTitle || evCategory}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowEventSelector(true)}
+                      className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-800 text-xs font-semibold hover:bg-gray-100 cursor-pointer"
+                    >
+                      Switch Event
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        loadEventIntoForm(null);
+                        window.setTimeout(() => evTitleInputRef.current?.focus(), 40);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      New Event
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Direct Event Text Fields First */}
+              <div className="p-4 rounded-xl bg-white border border-gray-200 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                  <h3 className="text-sm font-bold text-[#650019]">
+                    Event Text Details (Title, Date, Venue & Description)
+                  </h3>
+                  <span className="text-[11px] text-emerald-700 font-semibold">
+                    Auto-saves every word automatically
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                      Event Title *
+                    </label>
+                    <input
+                      ref={evTitleInputRef}
+                      type="text"
+                      required
+                      minLength={5}
+                      maxLength={140}
+                      value={evTitle ?? ''}
+                      onChange={(e) => {
+                        eventDirtyRef.current = true;
+                        setEvTitle(e.target.value);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#650019]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                      Category *
+                    </label>
+                    <select
+                      value={evCategory ?? 'Homecoming'}
+                      onChange={(e) => {
+                        eventDirtyRef.current = true;
+                        setEvCategory(e.target.value as EventCategory);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    >
+                      {ALLOWED_EVENT_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                      Date & Time *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={4}
+                      maxLength={50}
+                      value={evDate ?? ''}
+                      onChange={(e) => {
+                        eventDirtyRef.current = true;
+                        setEvDate(e.target.value);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                      Venue *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={3}
+                      maxLength={140}
+                      value={evVenue ?? ''}
+                      onChange={(e) => {
+                        eventDirtyRef.current = true;
+                        setEvVenue(e.target.value);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                      Status *
+                    </label>
+                    <select
+                      value={evStatus ?? 'upcoming'}
+                      onChange={(e) => {
+                        eventDirtyRef.current = true;
+                        setEvStatus(
+                          e.target.value as 'upcoming' | 'ongoing' | 'completed' | 'archived'
+                        );
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                    >
+                      <option value="upcoming">Upcoming</option>
+                      <option value="ongoing">Ongoing</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                    Event Description *
+                  </label>
+                  <textarea
+                    rows={3}
+                    required
+                    minLength={10}
+                    maxLength={1000}
+                    value={evDesc ?? ''}
+                    onChange={(e) => {
+                      eventDirtyRef.current = true;
+                      setEvDesc(e.target.value);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
+                  />
+                </div>
               </div>
 
               {/* Sliding Pictures Manager */}
@@ -1186,9 +1653,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                         />
                         <button
                           type="button"
-                          onClick={() =>
-                            setEvSlides((prev) => prev.filter((_, i) => i !== idx))
-                          }
+                          onClick={() => {
+                            eventDirtyRef.current = true;
+                            setEvSlides((prev) => prev.filter((_, i) => i !== idx));
+                          }}
                           title="Remove slide"
                           className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-red-600 text-white flex items-center justify-center text-[10px] hover:bg-red-700 cursor-pointer"
                         >
@@ -1205,8 +1673,9 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                 )}
 
                 {evSlideMode === 'local' ? (
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div key="event-slide-local" className="flex flex-wrap items-center gap-2">
                     <input
+                      key="event-slide-file-input"
                       ref={evFileInputRef}
                       type="file"
                       accept="image/*"
@@ -1226,8 +1695,9 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     </label>
                   </div>
                 ) : (
-                  <div className="flex gap-2">
+                  <div key="event-slide-link" className="flex gap-2">
                     <input
+                      key="event-slide-url-input"
                       type="url"
                       value={evSlideLink ?? ''}
                       onChange={(e) => setEvSlideLink(e.target.value)}
@@ -1246,111 +1716,17 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Event Title *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={5}
-                    maxLength={140}
-                    value={evTitle ?? ''}
-                    onChange={(e) => setEvTitle(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Category *
-                  </label>
-                  <select
-                    value={evCategory ?? 'Homecoming'}
-                    onChange={(e) => setEvCategory(e.target.value as EventCategory)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    {ALLOWED_EVENT_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Date & Time *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={4}
-                    maxLength={50}
-                    value={evDate ?? ''}
-                    onChange={(e) => setEvDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Venue *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={3}
-                    maxLength={140}
-                    value={evVenue ?? ''}
-                    onChange={(e) => setEvVenue(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                    Status *
-                  </label>
-                  <select
-                    value={evStatus ?? 'upcoming'}
-                    onChange={(e) =>
-                      setEvStatus(
-                        e.target.value as 'upcoming' | 'ongoing' | 'completed' | 'archived'
-                      )
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                  >
-                    <option value="upcoming">Upcoming</option>
-                    <option value="ongoing">Ongoing</option>
-                    <option value="completed">Completed</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                  Event Description *
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  minLength={10}
-                  maxLength={1000}
-                  value={evDesc ?? ''}
-                  onChange={(e) => setEvDesc(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-gray-200 flex justify-end">
+              <div className="pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-emerald-700 font-semibold">
+                  Text & sliding photo changes auto-save automatically.
+                </span>
                 <button
                   type="submit"
                   disabled={saving}
                   className="px-5 py-2.5 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Save className="w-4 h-4 text-[#D4AF37]" />
-                  {saving ? 'Auto-Syncing...' : 'Save Event & Sliding Photos'}
+                  {saving ? 'Auto-Syncing...' : 'Save & Done'}
                 </button>
               </div>
             </form>
@@ -1358,26 +1734,46 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
 
           {/* TAB 3: DIRECTORY PROFILES */}
           {activeTab === 'directory' && (
-            <form onSubmit={handleSaveAlumSubmit} className="space-y-5">
-              <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1">
-                  Select Alumnus / Alumna Profile to Edit
-                </label>
-                <select
-                  value={selectedAlumUid ?? ''}
-                  onChange={(e) => {
-                    const found = alumniList.find((a) => a.uid === e.target.value) || null;
-                    loadAlumIntoForm(found);
-                  }}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold"
-                >
-                  {alumniList.map((a) => (
-                    <option key={a.uid} value={a.uid}>
-                      {a.fullName} (Batch {a.graduationYear} · {a.strand})
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <form key="tab-form-directory" onSubmit={handleSaveAlumSubmit} className="space-y-5">
+              {showDirSelector ? (
+                <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1">
+                    Select Alumnus / Alumna Profile to Edit
+                  </label>
+                  <select
+                    value={selectedAlumUid ?? ''}
+                    onChange={(e) => {
+                      const found = alumniList.find((a) => a.uid === e.target.value) || null;
+                      loadAlumIntoForm(found);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold"
+                  >
+                    {alumniList.map((a) => (
+                      <option key={a.uid} value={a.uid}>
+                        {a.fullName} (Batch {a.graduationYear} · {a.strand})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-[#450012]/5 border border-[#D4AF37]/50 px-3.5 py-2.5 rounded-xl">
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-[#650019]">
+                      Direct Alumni Profile Editor
+                    </p>
+                    <p className="text-xs font-bold text-gray-900 truncate">
+                      Editing: {alumName} (Batch {alumYear})
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDirSelector(true)}
+                    className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-800 text-xs font-semibold hover:bg-gray-100 cursor-pointer"
+                  >
+                    Switch Profile
+                  </button>
+                </div>
+              )}
 
               {/* Photo upload */}
               <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 flex flex-col sm:flex-row items-center gap-4">
@@ -1418,8 +1814,9 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     </button>
                   </div>
                   {alumPhotoMode === 'local' ? (
-                    <div className="flex items-center gap-2">
+                    <div key="alum-photo-local" className="flex items-center gap-2">
                       <input
+                        key="alum-photo-file-input"
                         ref={alumFileRef}
                         type="file"
                         accept="image/*"
@@ -1436,11 +1833,13 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                       </label>
                     </div>
                   ) : (
-                    <div className="flex gap-2">
+                    <div key="alum-photo-link" className="flex gap-2">
                       <input
+                        key="alum-photo-url-input"
                         type="url"
                         value={alumPhotoLink ?? ''}
                         onChange={(e) => {
+                          alumDirtyRef.current = true;
                           setAlumPhotoLink(e.target.value);
                           setAlumPhotoUrl(normalizeImageUrl(e.target.value));
                         }}
@@ -1458,10 +1857,14 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     Full Name *
                   </label>
                   <input
+                    ref={alumNameInputRef}
                     type="text"
                     required
                     value={alumName ?? ''}
-                    onChange={(e) => setAlumName(e.target.value)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumName(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1471,7 +1874,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   </label>
                   <select
                     value={alumYear ?? 2020}
-                    onChange={(e) => setAlumYear(Number(e.target.value))}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumYear(Number(e.target.value));
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-mono-num"
                   >
                     {yearsList.map((yr) => (
@@ -1487,7 +1893,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   </label>
                   <select
                     value={alumStrand ?? 'STEM'}
-                    onChange={(e) => setAlumStrand(e.target.value as AlumniStrand)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumStrand(e.target.value as AlumniStrand);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   >
                     {ALLOWED_STRANDS.map((s) => (
@@ -1505,7 +1914,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     type="text"
                     required
                     value={alumSection ?? ''}
-                    onChange={(e) => setAlumSection(e.target.value)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumSection(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1517,7 +1929,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     type="text"
                     required
                     value={alumCourse ?? ''}
-                    onChange={(e) => setAlumCourse(e.target.value)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumCourse(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1529,7 +1944,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     type="text"
                     required
                     value={alumProfession ?? ''}
-                    onChange={(e) => setAlumProfession(e.target.value)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumProfession(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1541,7 +1959,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     type="text"
                     required
                     value={alumEmployment ?? ''}
-                    onChange={(e) => setAlumEmployment(e.target.value)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumEmployment(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1553,7 +1974,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     type="text"
                     required
                     value={alumCity ?? ''}
-                    onChange={(e) => setAlumCity(e.target.value)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumCity(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1563,7 +1987,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   </label>
                   <select
                     value={alumIndustry ?? 'Engineering & Architecture'}
-                    onChange={(e) => setAlumIndustry(e.target.value)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumIndustry(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   >
                     {ALLOWED_INDUSTRY_SECTORS.map((sec) => (
@@ -1579,7 +2006,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   </label>
                   <select
                     value={alumMentorship ?? 'mentor'}
-                    onChange={(e) => setAlumMentorship(e.target.value as MentorshipRole)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumMentorship(e.target.value as MentorshipRole);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   >
                     <option value="mentor">Mentor</option>
@@ -1596,20 +2026,26 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     rows={3}
                     required
                     value={alumBio ?? ''}
-                    onChange={(e) => setAlumBio(e.target.value)}
+                    onChange={(e) => {
+                      alumDirtyRef.current = true;
+                      setAlumBio(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-gray-200 flex justify-end">
+              <div className="pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-emerald-700 font-semibold">
+                  Profile changes auto-save automatically.
+                </span>
                 <button
                   type="submit"
                   disabled={saving}
                   className="px-5 py-2.5 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Save className="w-4 h-4 text-[#D4AF37]" />
-                  {saving ? 'Auto-Syncing...' : 'Save Alumni Profile'}
+                  {saving ? 'Auto-Syncing...' : 'Save & Done'}
                 </button>
               </div>
             </form>
@@ -1617,53 +2053,94 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
 
           {/* TAB 4: ANNOUNCEMENTS */}
           {activeTab === 'announcements' && (
-            <form onSubmit={handleSaveAnnSubmit} className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200">
-                <div className="flex-1 min-w-[220px]">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1">
-                    Select Official Bulletin to Edit
-                  </label>
-                  <select
-                    value={selectedAnnId ?? ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === 'NEW') {
-                        loadAnnIntoForm(null);
-                      } else {
-                        loadAnnIntoForm(announcements.find((a) => a.id === val) || null);
-                      }
+            <form key="tab-form-announcements" onSubmit={handleSaveAnnSubmit} className="space-y-4">
+              {showAnnSelector ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200">
+                  <div className="flex-1 min-w-[220px]">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1">
+                      Select Official Bulletin to Edit
+                    </label>
+                    <select
+                      value={selectedAnnId ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'NEW') {
+                          loadAnnIntoForm(null);
+                        } else {
+                          loadAnnIntoForm(announcements.find((a) => a.id === val) || null);
+                        }
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold"
+                    >
+                      {announcements.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          [{a.category}] {a.title}
+                        </option>
+                      ))}
+                      <option value="NEW">+ Publish New Bulletin</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      loadAnnIntoForm(null);
+                      setShowAnnSelector(false);
+                      window.setTimeout(() => annTitleInputRef.current?.focus(), 40);
                     }}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold"
+                    className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
-                    {announcements.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        [{a.category}] {a.title}
-                      </option>
-                    ))}
-                    <option value="NEW">+ Publish New Bulletin</option>
-                  </select>
+                    <Plus className="w-3.5 h-3.5" />
+                    New Bulletin
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => loadAnnIntoForm(null)}
-                  className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  New Bulletin
-                </button>
-              </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-[#450012]/5 border border-[#D4AF37]/50 px-3.5 py-2.5 rounded-xl">
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-[#650019]">
+                      Direct Official Bulletin Editor
+                    </p>
+                    <p className="text-xs font-bold text-gray-900 truncate">
+                      {selectedAnnId === 'NEW' ? 'Publishing New Bulletin' : `Editing: ${annTitle}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowAnnSelector(true)}
+                      className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-800 text-xs font-semibold hover:bg-gray-100 cursor-pointer"
+                    >
+                      Switch Bulletin
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        loadAnnIntoForm(null);
+                        window.setTimeout(() => annTitleInputRef.current?.focus(), 40);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      New
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                   Announcement Headline (5–150 chars) *
                 </label>
                 <input
+                  ref={annTitleInputRef}
                   type="text"
                   required
                   minLength={5}
                   maxLength={150}
                   value={annTitle ?? ''}
-                  onChange={(e) => setAnnTitle(e.target.value)}
+                  onChange={(e) => {
+                    annDirtyRef.current = true;
+                    setAnnTitle(e.target.value);
+                  }}
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                 />
               </div>
@@ -1675,7 +2152,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   </label>
                   <select
                     value={annCategory ?? 'Official Bulletin'}
-                    onChange={(e) => setAnnCategory(e.target.value as AnnouncementCategory)}
+                    onChange={(e) => {
+                      annDirtyRef.current = true;
+                      setAnnCategory(e.target.value as AnnouncementCategory);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   >
                     {ALLOWED_ANNOUNCEMENT_CATEGORIES.map((c) => (
@@ -1695,7 +2175,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     minLength={2}
                     maxLength={100}
                     value={annAuthor ?? ''}
-                    onChange={(e) => setAnnAuthor(e.target.value)}
+                    onChange={(e) => {
+                      annDirtyRef.current = true;
+                      setAnnAuthor(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1711,7 +2194,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   minLength={10}
                   maxLength={300}
                   value={annSummary ?? ''}
-                  onChange={(e) => setAnnSummary(e.target.value)}
+                  onChange={(e) => {
+                    annDirtyRef.current = true;
+                    setAnnSummary(e.target.value);
+                  }}
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                 />
               </div>
@@ -1726,19 +2212,25 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   minLength={20}
                   maxLength={2000}
                   value={annContent ?? ''}
-                  onChange={(e) => setAnnContent(e.target.value)}
+                  onChange={(e) => {
+                    annDirtyRef.current = true;
+                    setAnnContent(e.target.value);
+                  }}
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                 />
               </div>
 
-              <div className="pt-3 border-t border-gray-200 flex justify-end">
+              <div className="pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-emerald-700 font-semibold">
+                  Bulletin changes auto-save automatically.
+                </span>
                 <button
                   type="submit"
                   disabled={saving}
                   className="px-5 py-2.5 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Save className="w-4 h-4 text-[#D4AF37]" />
-                  {saving ? 'Auto-Syncing...' : 'Save Official Bulletin'}
+                  {saving ? 'Auto-Syncing...' : 'Save & Done'}
                 </button>
               </div>
             </form>
@@ -1746,53 +2238,96 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
 
           {/* TAB 5: SPOTLIGHT MILESTONES */}
           {activeTab === 'spotlights' && (
-            <form onSubmit={handleSaveSpotlightSubmit} className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200">
-                <div className="flex-1 min-w-[220px]">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1">
-                    Select Alumni Spotlight Story to Edit
-                  </label>
-                  <select
-                    value={selectedSpotId ?? ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === 'NEW') {
-                        loadSpotlightIntoForm(null);
-                      } else {
-                        loadSpotlightIntoForm(spotlights.find((s) => s.id === val) || null);
-                      }
+            <form key="tab-form-spotlights" onSubmit={handleSaveSpotlightSubmit} className="space-y-4">
+              {showSpotSelector ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200">
+                  <div className="flex-1 min-w-[220px]">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1">
+                      Select Alumni Spotlight Story to Edit
+                    </label>
+                    <select
+                      value={selectedSpotId ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'NEW') {
+                          loadSpotlightIntoForm(null);
+                        } else {
+                          loadSpotlightIntoForm(spotlights.find((s) => s.id === val) || null);
+                        }
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold"
+                    >
+                      {spotlights.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.nomineeName} (Batch {s.graduationYear})
+                        </option>
+                      ))}
+                      <option value="NEW">+ Add New Spotlight Story</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      loadSpotlightIntoForm(null);
+                      setShowSpotSelector(false);
+                      window.setTimeout(() => spotNomineeInputRef.current?.focus(), 40);
                     }}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-semibold"
+                    className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
-                    {spotlights.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.nomineeName} (Batch {s.graduationYear})
-                      </option>
-                    ))}
-                    <option value="NEW">+ Add New Spotlight Story</option>
-                  </select>
+                    <Plus className="w-3.5 h-3.5" />
+                    New Spotlight
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => loadSpotlightIntoForm(null)}
-                  className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  New Spotlight
-                </button>
-              </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-[#450012]/5 border border-[#D4AF37]/50 px-3.5 py-2.5 rounded-xl">
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-[#650019]">
+                      Direct Spotlight Milestone Editor
+                    </p>
+                    <p className="text-xs font-bold text-gray-900 truncate">
+                      {selectedSpotId === 'NEW'
+                        ? 'Adding New Spotlight Story'
+                        : `Editing: ${spotNominee}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowSpotSelector(true)}
+                      className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-800 text-xs font-semibold hover:bg-gray-100 cursor-pointer"
+                    >
+                      Switch Story
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        loadSpotlightIntoForm(null);
+                        window.setTimeout(() => spotNomineeInputRef.current?.focus(), 40);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      New
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
                   Nominee Full Name *
                 </label>
                 <input
+                  ref={spotNomineeInputRef}
                   type="text"
                   required
                   minLength={2}
                   maxLength={100}
                   value={spotNominee ?? ''}
-                  onChange={(e) => setSpotNominee(e.target.value)}
+                  onChange={(e) => {
+                    spotDirtyRef.current = true;
+                    setSpotNominee(e.target.value);
+                  }}
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                 />
               </div>
@@ -1804,7 +2339,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   </label>
                   <select
                     value={spotYear ?? 2020}
-                    onChange={(e) => setSpotYear(Number(e.target.value))}
+                    onChange={(e) => {
+                      spotDirtyRef.current = true;
+                      setSpotYear(Number(e.target.value));
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-mono-num"
                   >
                     {yearsList.map((yr) => (
@@ -1820,7 +2358,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   </label>
                   <select
                     value={spotStrand ?? 'STEM'}
-                    onChange={(e) => setSpotStrand(e.target.value as AlumniStrand)}
+                    onChange={(e) => {
+                      spotDirtyRef.current = true;
+                      setSpotStrand(e.target.value as AlumniStrand);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   >
                     {ALLOWED_STRANDS.map((s) => (
@@ -1843,7 +2384,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     minLength={2}
                     maxLength={100}
                     value={spotProfession ?? ''}
-                    onChange={(e) => setSpotProfession(e.target.value)}
+                    onChange={(e) => {
+                      spotDirtyRef.current = true;
+                      setSpotProfession(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1857,7 +2401,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                     minLength={2}
                     maxLength={100}
                     value={spotNominator ?? ''}
-                    onChange={(e) => setSpotNominator(e.target.value)}
+                    onChange={(e) => {
+                      spotDirtyRef.current = true;
+                      setSpotNominator(e.target.value);
+                    }}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                   />
                 </div>
@@ -1873,7 +2420,10 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   minLength={5}
                   maxLength={140}
                   value={spotMilestone ?? ''}
-                  onChange={(e) => setSpotMilestone(e.target.value)}
+                  onChange={(e) => {
+                    spotDirtyRef.current = true;
+                    setSpotMilestone(e.target.value);
+                  }}
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                 />
               </div>
@@ -1888,19 +2438,25 @@ export const PortalEditMenuModal: React.FC<PortalEditMenuModalProps> = ({
                   minLength={15}
                   maxLength={800}
                   value={spotStory ?? ''}
-                  onChange={(e) => setSpotStory(e.target.value)}
+                  onChange={(e) => {
+                    spotDirtyRef.current = true;
+                    setSpotStory(e.target.value);
+                  }}
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"
                 />
               </div>
 
-              <div className="pt-3 border-t border-gray-200 flex justify-end">
+              <div className="pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-emerald-700 font-semibold">
+                  Spotlight milestone changes auto-save automatically.
+                </span>
                 <button
                   type="submit"
                   disabled={saving}
                   className="px-5 py-2.5 rounded-lg bg-[#650019] text-white text-xs font-bold hover:bg-[#450012] inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Save className="w-4 h-4 text-[#D4AF37]" />
-                  {saving ? 'Auto-Syncing...' : 'Save Spotlight Milestone'}
+                  {saving ? 'Auto-Syncing...' : 'Save & Done'}
                 </button>
               </div>
             </form>

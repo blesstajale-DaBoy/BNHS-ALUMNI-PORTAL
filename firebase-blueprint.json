@@ -145,6 +145,22 @@
           "maxLength": 300,
           "description": "Editable footer location and motto subtitle."
         },
+        "deletedProfileIds": {
+          "type": "array",
+          "description": "Bounded list of deleted initial directory profile IDs synced across preview and live published."
+        },
+        "deletedEventIds": {
+          "type": "array",
+          "description": "Bounded list of deleted initial event IDs synced across preview and live published."
+        },
+        "deletedAnnouncementIds": {
+          "type": "array",
+          "description": "Bounded list of deleted initial announcement IDs synced across preview and live published."
+        },
+        "deletedSpotlightIds": {
+          "type": "array",
+          "description": "Bounded list of deleted initial spotlight story IDs synced across preview and live published."
+        },
         "visibility": {
           "type": "string",
           "enum": ["public"],

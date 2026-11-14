@@ -63,6 +63,7 @@ service cloud.firestore {
           'welcomeDescription', 'directoryKicker', 'directoryTitle',
           'directoryDescription', 'facebookUrl', 'twitterUrl', 'linkedinUrl',
           'heroCaptionLocation', 'heroCaptionTitle', 'heroCaptionDescription', 'footerSubtitle',
+          'deletedProfileIds', 'deletedEventIds', 'deletedAnnouncementIds', 'deletedSpotlightIds',
           'visibility', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.authorId) &&
@@ -85,6 +86,22 @@ service cloud.firestore {
         data.heroCaptionTitle is string && data.heroCaptionTitle.size() >= 2 && data.heroCaptionTitle.size() <= 140 &&
         data.heroCaptionDescription is string && data.heroCaptionDescription.size() >= 5 && data.heroCaptionDescription.size() <= 400 &&
         data.footerSubtitle is string && data.footerSubtitle.size() >= 5 && data.footerSubtitle.size() <= 300 &&
+        (!('deletedProfileIds' in data) || (
+          data.deletedProfileIds is list && data.deletedProfileIds.size() <= 100 &&
+          (data.deletedProfileIds.size() == 0 || (data.deletedProfileIds[0] is string && data.deletedProfileIds[0].size() <= 128))
+        )) &&
+        (!('deletedEventIds' in data) || (
+          data.deletedEventIds is list && data.deletedEventIds.size() <= 100 &&
+          (data.deletedEventIds.size() == 0 || (data.deletedEventIds[0] is string && data.deletedEventIds[0].size() <= 128))
+        )) &&
+        (!('deletedAnnouncementIds' in data) || (
+          data.deletedAnnouncementIds is list && data.deletedAnnouncementIds.size() <= 100 &&
+          (data.deletedAnnouncementIds.size() == 0 || (data.deletedAnnouncementIds[0] is string && data.deletedAnnouncementIds[0].size() <= 128))
+        )) &&
+        (!('deletedSpotlightIds' in data) || (
+          data.deletedSpotlightIds is list && data.deletedSpotlightIds.size() <= 100 &&
+          (data.deletedSpotlightIds.size() == 0 || (data.deletedSpotlightIds[0] is string && data.deletedSpotlightIds[0].size() <= 128))
+        )) &&
         data.visibility is string && data.visibility.size() == 6 && data.visibility == 'public' &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -261,7 +278,8 @@ service cloud.firestore {
             'welcomeDescription', 'directoryKicker', 'directoryTitle',
             'directoryDescription', 'facebookUrl', 'twitterUrl', 'linkedinUrl',
             'heroCaptionLocation', 'heroCaptionTitle', 'heroCaptionDescription',
-            'footerSubtitle', 'updatedAt'
+            'footerSubtitle', 'deletedProfileIds', 'deletedEventIds',
+            'deletedAnnouncementIds', 'deletedSpotlightIds', 'updatedAt'
           ])) ||
           isAdmin()
         );

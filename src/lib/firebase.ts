@@ -259,3 +259,85 @@ export function sanitizeId(raw: string): string {
   const cleaned = raw.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 128);
   return cleaned.length > 0 ? cleaned : 'doc_1';
 }
+
+function recompressDataUrl(dataUrl: string, maxDimension: number, quality: number): Promise<string> {
+  return new Promise((resolve) => {
+    if (!dataUrl.startsWith('data:image/') || dataUrl.startsWith('data:image/gif')) {
+      resolve(dataUrl.slice(0, 148000));
+      return;
+    }
+    const img = new Image();
+    img.onerror = () => resolve(dataUrl.slice(0, 148000));
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      if (width > maxDimension || height > maxDimension) {
+        if (width >= height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl.slice(0, 148000));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality).slice(0, 148000));
+    };
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Ensures an array of up to 10 event slides stays comfortably within Firestore's 1MB document limit
+ * so saving multi-photo event carousels never fails on live cloud sync.
+ */
+export async function fitSlidesToFirestoreBudget(
+  rawSlides: string[],
+  maxTotalChars = 680000
+): Promise<string[]> {
+  const unique = Array.from(
+    new Set(rawSlides.map((u) => (u || '').trim()).filter(Boolean))
+  ).slice(0, 10);
+
+  let total = unique.reduce((sum, s) => sum + s.length, 0);
+  if (total <= maxTotalChars) {
+    return unique.map((u) => u.slice(0, 150000));
+  }
+
+  const perImageBudget = Math.max(40000, Math.floor(maxTotalChars / Math.max(unique.length, 1)));
+  const fitted: string[] = [];
+  for (const slide of unique) {
+    if (!slide.startsWith('data:image/') || slide.length <= perImageBudget) {
+      fitted.push(slide.slice(0, 150000));
+      continue;
+    }
+    let candidate = await recompressDataUrl(slide, 400, 0.65);
+    if (candidate.length > perImageBudget) {
+      candidate = await recompressDataUrl(candidate, 300, 0.52);
+    }
+    fitted.push(candidate.slice(0, 150000));
+  }
+
+  total = fitted.reduce((sum, s) => sum + s.length, 0);
+  if (total > maxTotalChars) {
+    const finalResult: string[] = [];
+    let running = 0;
+    for (const s of fitted) {
+      if (running + s.length <= maxTotalChars || finalResult.length === 0) {
+        finalResult.push(s);
+        running += s.length;
+      }
+    }
+    return finalResult;
+  }
+
+  return fitted;
+}
+

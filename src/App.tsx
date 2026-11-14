@@ -39,6 +39,7 @@ import {
 import {
   auth,
   db,
+  fitSlidesToFirestoreBudget,
   handleFirestoreError,
   logOutUser,
   OperationType,
@@ -138,8 +139,14 @@ export default function App() {
   const [googleSigningIn, setGoogleSigningIn] = useState(false);
 
   // Cloud Sync Indicator State
-  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'local'>('synced');
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'local' | 'error'>(
+    'local'
+  );
   const [lastSyncedTime, setLastSyncedTime] = useState<string>('Live');
+  const [lastCloudError, setLastCloudError] = useState<string | null>(null);
+  const [hasLocalSettingsEdit, setHasLocalSettingsEdit] = useState<boolean>(() =>
+    loadJsonFromStorage<boolean>(STORAGE_KEYS.hasLocalSettingsEdit, false)
+  );
 
   // Effective user combines Firebase Auth User or Direct Alumni Portal Session User
   const currentUser = useMemo<User | null>(() => {
@@ -310,13 +317,30 @@ export default function App() {
     saveJsonToStorage(STORAGE_KEYS.rsvps, myRsvps);
   }, [myRsvps]);
 
-  // Real-time Debounced Auto-Sync (saves all portal changes automatically)
+  const isCloudVerified = Boolean(firebaseUser && firebaseUser.emailVerified);
+
+  const pendingCloudCount = useMemo(() => {
+    return (
+      (hasLocalSettingsEdit ? 1 : 0) +
+      Object.keys(localProfileOverrides).length +
+      Object.keys(localEventOverrides).length +
+      Object.keys(localAnnouncementOverrides).length +
+      Object.keys(localSpotlightOverrides).length
+    );
+  }, [
+    hasLocalSettingsEdit,
+    localProfileOverrides,
+    localEventOverrides,
+    localAnnouncementOverrides,
+    localSpotlightOverrides,
+  ]);
+
+  // Real-time Debounced Local Persistence (keeps browser storage current)
   useEffect(() => {
     if (!autoSyncMountedRef.current) {
       autoSyncMountedRef.current = true;
       return;
     }
-    setCloudSyncStatus('syncing');
     const timer = window.setTimeout(() => {
       saveJsonToStorage(STORAGE_KEYS.settings, portalSettings);
       saveJsonToStorage(STORAGE_KEYS.profiles, localProfileOverrides);
@@ -329,10 +353,12 @@ export default function App() {
       saveJsonToStorage(STORAGE_KEYS.deletedSpotlights, deletedSpotlightIds);
       saveJsonToStorage(STORAGE_KEYS.rsvps, myRsvps);
 
-      setCloudSyncStatus('synced');
       setLastSyncedTime(
         new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       );
+      if (!firebaseUser || !firebaseUser.emailVerified) {
+        setCloudSyncStatus('local');
+      }
     }, 450);
 
     return () => window.clearTimeout(timer);
@@ -347,6 +373,7 @@ export default function App() {
     localSpotlightOverrides,
     deletedSpotlightIds,
     myRsvps,
+    firebaseUser,
   ]);
 
   // Track Firebase Auth State
@@ -355,6 +382,7 @@ export default function App() {
       setFirebaseUser(user);
       if (!user) {
         syncedSessionUidRef.current = null;
+        setCloudSyncStatus('local');
       }
       setAuthReady(true);
     });
@@ -375,49 +403,92 @@ export default function App() {
         snap.forEach((docSnap) => {
           if (docSnap.id === 'main') {
             const d = docSnap.data();
-            const updatedSettings: PortalSettingsRecord = {
-              logoUrl: d.logoUrl || DEFAULT_PORTAL_SETTINGS.logoUrl,
-              logoAnimated:
-                typeof d.logoAnimated === 'boolean'
-                  ? d.logoAnimated
-                  : DEFAULT_PORTAL_SETTINGS.logoAnimated,
-              heroImageUrl: d.heroImageUrl || DEFAULT_PORTAL_SETTINGS.heroImageUrl,
-              schoolKicker: d.schoolKicker || DEFAULT_PORTAL_SETTINGS.schoolKicker,
-              portalSubtitle: d.portalSubtitle || DEFAULT_PORTAL_SETTINGS.portalSubtitle,
-              welcomeTitle: d.welcomeTitle || DEFAULT_PORTAL_SETTINGS.welcomeTitle,
-              mottoText: d.mottoText || DEFAULT_PORTAL_SETTINGS.mottoText,
-              welcomeDescription: (
-                d.welcomeDescription || DEFAULT_PORTAL_SETTINGS.welcomeDescription
-              )
-                .replace(/Batch 1971/g, 'Batch 1982')
-                .replace(/1971-1999/g, '1982-1999'),
-              directoryKicker: d.directoryKicker || DEFAULT_PORTAL_SETTINGS.directoryKicker,
-              directoryTitle: d.directoryTitle || DEFAULT_PORTAL_SETTINGS.directoryTitle,
-              directoryDescription:
-                d.directoryDescription || DEFAULT_PORTAL_SETTINGS.directoryDescription,
-              facebookUrl:
-                typeof d.facebookUrl === 'string'
-                  ? d.facebookUrl
-                  : DEFAULT_PORTAL_SETTINGS.facebookUrl,
-              twitterUrl:
-                typeof d.twitterUrl === 'string'
-                  ? d.twitterUrl
-                  : DEFAULT_PORTAL_SETTINGS.twitterUrl,
-              linkedinUrl:
-                typeof d.linkedinUrl === 'string'
-                  ? d.linkedinUrl
-                  : DEFAULT_PORTAL_SETTINGS.linkedinUrl,
-              heroCaptionLocation:
-                d.heroCaptionLocation || DEFAULT_PORTAL_SETTINGS.heroCaptionLocation,
-              heroCaptionTitle: d.heroCaptionTitle || DEFAULT_PORTAL_SETTINGS.heroCaptionTitle,
-              heroCaptionDescription:
-                d.heroCaptionDescription || DEFAULT_PORTAL_SETTINGS.heroCaptionDescription,
-              footerSubtitle: d.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle,
-              visibility: 'public',
+            const pendingSettingsEdit = loadJsonFromStorage<boolean>(
+              STORAGE_KEYS.hasLocalSettingsEdit,
+              false
+            );
+            if (!pendingSettingsEdit) {
+              const updatedSettings: PortalSettingsRecord = {
+                logoUrl: d.logoUrl || DEFAULT_PORTAL_SETTINGS.logoUrl,
+                logoAnimated:
+                  typeof d.logoAnimated === 'boolean'
+                    ? d.logoAnimated
+                    : DEFAULT_PORTAL_SETTINGS.logoAnimated,
+                heroImageUrl: d.heroImageUrl || DEFAULT_PORTAL_SETTINGS.heroImageUrl,
+                schoolKicker: d.schoolKicker || DEFAULT_PORTAL_SETTINGS.schoolKicker,
+                portalSubtitle: d.portalSubtitle || DEFAULT_PORTAL_SETTINGS.portalSubtitle,
+                welcomeTitle: d.welcomeTitle || DEFAULT_PORTAL_SETTINGS.welcomeTitle,
+                mottoText: d.mottoText || DEFAULT_PORTAL_SETTINGS.mottoText,
+                welcomeDescription: (
+                  d.welcomeDescription || DEFAULT_PORTAL_SETTINGS.welcomeDescription
+                )
+                  .replace(/Batch 1971/g, 'Batch 1982')
+                  .replace(/1971-1999/g, '1982-1999'),
+                directoryKicker: d.directoryKicker || DEFAULT_PORTAL_SETTINGS.directoryKicker,
+                directoryTitle: d.directoryTitle || DEFAULT_PORTAL_SETTINGS.directoryTitle,
+                directoryDescription:
+                  d.directoryDescription || DEFAULT_PORTAL_SETTINGS.directoryDescription,
+                facebookUrl:
+                  typeof d.facebookUrl === 'string'
+                    ? d.facebookUrl
+                    : DEFAULT_PORTAL_SETTINGS.facebookUrl,
+                twitterUrl:
+                  typeof d.twitterUrl === 'string'
+                    ? d.twitterUrl
+                    : DEFAULT_PORTAL_SETTINGS.twitterUrl,
+                linkedinUrl:
+                  typeof d.linkedinUrl === 'string'
+                    ? d.linkedinUrl
+                    : DEFAULT_PORTAL_SETTINGS.linkedinUrl,
+                heroCaptionLocation:
+                  d.heroCaptionLocation || DEFAULT_PORTAL_SETTINGS.heroCaptionLocation,
+                heroCaptionTitle: d.heroCaptionTitle || DEFAULT_PORTAL_SETTINGS.heroCaptionTitle,
+                heroCaptionDescription:
+                  d.heroCaptionDescription || DEFAULT_PORTAL_SETTINGS.heroCaptionDescription,
+                footerSubtitle: d.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle,
+                visibility: 'public',
+              };
+              setPortalSettings(updatedSettings);
+            }
+
+            const toDeletedMap = (arr: unknown): Record<string, boolean> | null => {
+              if (!Array.isArray(arr)) return null;
+              const next: Record<string, boolean> = {};
+              arr.forEach((id) => {
+                if (typeof id === 'string' && id.trim().length > 0) next[id] = true;
+              });
+              return next;
             };
-            setPortalSettings(updatedSettings);
-            setCloudSyncStatus('synced');
-            setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+            const cloudDelProfiles = toDeletedMap(d.deletedProfileIds);
+            if (cloudDelProfiles) {
+              setDeletedProfileUids((prev) =>
+                pendingSettingsEdit ? { ...cloudDelProfiles, ...prev } : cloudDelProfiles
+              );
+            }
+            const cloudDelEvents = toDeletedMap(d.deletedEventIds);
+            if (cloudDelEvents) {
+              setDeletedEventIds((prev) =>
+                pendingSettingsEdit ? { ...cloudDelEvents, ...prev } : cloudDelEvents
+              );
+            }
+            const cloudDelAnns = toDeletedMap(d.deletedAnnouncementIds);
+            if (cloudDelAnns) {
+              setDeletedAnnouncementIds((prev) =>
+                pendingSettingsEdit ? { ...cloudDelAnns, ...prev } : cloudDelAnns
+              );
+            }
+            const cloudDelSpots = toDeletedMap(d.deletedSpotlightIds);
+            if (cloudDelSpots) {
+              setDeletedSpotlightIds((prev) =>
+                pendingSettingsEdit ? { ...cloudDelSpots, ...prev } : cloudDelSpots
+              );
+            }
+
+            setCloudSyncStatus(auth.currentUser?.emailVerified ? 'synced' : 'local');
+            setLastSyncedTime(
+              new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            );
           }
         });
       },
@@ -826,8 +897,22 @@ export default function App() {
     }
   };
 
+  const toDeletedIdList = (map: Record<string, boolean>): string[] =>
+    Object.keys(map)
+      .filter((id) => map[id] && isValidFirestoreId(id))
+      .slice(0, 100);
+
   // Build Firestore-safe portal settings payload
-  const buildPortalSettingsPayload = (merged: PortalSettingsRecord, authorUid: string) => ({
+  const buildPortalSettingsPayload = (
+    merged: PortalSettingsRecord,
+    authorUid: string,
+    deletedMaps?: {
+      deletedProfiles?: Record<string, boolean>;
+      deletedEvents?: Record<string, boolean>;
+      deletedAnns?: Record<string, boolean>;
+      deletedSpots?: Record<string, boolean>;
+    }
+  ) => ({
     authorId: authorUid,
     logoUrl: sanitizeString(merged.logoUrl || DEFAULT_PORTAL_SETTINGS.logoUrl, 150000),
     logoAnimated: Boolean(merged.logoAnimated),
@@ -883,13 +968,75 @@ export default function App() {
       merged.footerSubtitle || DEFAULT_PORTAL_SETTINGS.footerSubtitle,
       240
     ),
+    deletedProfileIds: toDeletedIdList(deletedMaps?.deletedProfiles ?? deletedProfileUids),
+    deletedEventIds: toDeletedIdList(deletedMaps?.deletedEvents ?? deletedEventIds),
+    deletedAnnouncementIds: toDeletedIdList(
+      deletedMaps?.deletedAnns ?? deletedAnnouncementIds
+    ),
+    deletedSpotlightIds: toDeletedIdList(deletedMaps?.deletedSpots ?? deletedSpotlightIds),
     visibility: 'public' as const,
     updatedAt: serverTimestamp(),
   });
 
+  const isSettingsPayloadValid = (p: ReturnType<typeof buildPortalSettingsPayload>): boolean =>
+    p.logoUrl.length >= 1 &&
+    p.heroImageUrl.length >= 1 &&
+    p.schoolKicker.length >= 2 &&
+    p.portalSubtitle.length >= 2 &&
+    p.welcomeTitle.length >= 2 &&
+    p.mottoText.length >= 2 &&
+    p.welcomeDescription.length >= 5 &&
+    p.directoryKicker.length >= 2 &&
+    p.directoryTitle.length >= 2 &&
+    p.directoryDescription.length >= 5 &&
+    p.heroCaptionLocation.length >= 2 &&
+    p.heroCaptionTitle.length >= 2 &&
+    p.heroCaptionDescription.length >= 5 &&
+    p.footerSubtitle.length >= 5;
+
+  const syncDeletedSeedsToPortalSettings = async (
+    user: User,
+    nextDeletedProfiles: Record<string, boolean>,
+    nextDeletedEvents: Record<string, boolean>,
+    nextDeletedAnns: Record<string, boolean>,
+    nextDeletedSpots: Record<string, boolean>
+  ): Promise<boolean> => {
+    try {
+      const settingsRef = doc(db, 'portal_settings', 'main');
+      const snap = await getDoc(settingsRef);
+      const payload = buildPortalSettingsPayload(portalSettings, user.uid, {
+        deletedProfiles: nextDeletedProfiles,
+        deletedEvents: nextDeletedEvents,
+        deletedAnns: nextDeletedAnns,
+        deletedSpots: nextDeletedSpots,
+      });
+      if (snap.exists()) {
+        await updateDoc(settingsRef, payload);
+      } else {
+        await setDoc(settingsRef, { ...payload, createdAt: serverTimestamp() });
+      }
+      saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, false);
+      setHasLocalSettingsEdit(false);
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Portal deletion settings sync failed:', msg);
+      setLastCloudError(msg);
+      return false;
+    }
+  };
+
   // Sync all pending local edits and deletions to Cloud Firestore when verified
-  const syncAllPendingChangesToCloud = async (user: User, includePortalSettings: boolean) => {
-    if (!user || !user.emailVerified) return;
+  const syncAllPendingChangesToCloud = async (
+    user: User,
+    includePortalSettings: boolean
+  ): Promise<{ hadError: boolean; errorMsg: string | null }> => {
+    if (!user || !user.emailVerified) {
+      return { hadError: true, errorMsg: 'Google account verification required.' };
+    }
+
+    let hadError = false;
+    let errorMsg: string | null = null;
 
     const shouldPushSettings =
       includePortalSettings ||
@@ -900,14 +1047,19 @@ export default function App() {
         const settingsRef = doc(db, 'portal_settings', 'main');
         const snap = await getDoc(settingsRef);
         const payload = buildPortalSettingsPayload(portalSettings, user.uid);
-        if (snap.exists()) {
-          await updateDoc(settingsRef, payload);
-        } else {
-          await setDoc(settingsRef, { ...payload, createdAt: serverTimestamp() });
+        if (isSettingsPayloadValid(payload)) {
+          if (snap.exists()) {
+            await updateDoc(settingsRef, payload);
+          } else {
+            await setDoc(settingsRef, { ...payload, createdAt: serverTimestamp() });
+          }
+          saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, false);
+          setHasLocalSettingsEdit(false);
         }
-        saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, false);
       } catch (err) {
-        console.warn('Portal settings cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Portal settings cloud sync error:', errorMsg);
       }
     }
 
@@ -937,8 +1089,7 @@ export default function App() {
       try {
         const ref = doc(db, 'alumni_profiles', prof.uid);
         const snap = await getDoc(ref);
-        const payload = {
-          uid: prof.uid,
+        const basePayload = {
           fullName: cleanName,
           graduationYear: Math.min(2100, Math.max(1971, Number(prof.graduationYear) || 2020)),
           formerSection: cleanSection,
@@ -955,12 +1106,19 @@ export default function App() {
           updatedAt: serverTimestamp(),
         };
         if (snap.exists()) {
-          await updateDoc(ref, payload);
+          await updateDoc(ref, basePayload);
         } else {
-          await setDoc(ref, { ...payload, createdAt: serverTimestamp() });
+          await setDoc(ref, { ...basePayload, uid: prof.uid, createdAt: serverTimestamp() });
         }
+        setLocalProfileOverrides((prev) => {
+          const next = { ...prev };
+          delete next[prof.uid];
+          return next;
+        });
       } catch (err) {
-        console.warn('Profile cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Profile cloud sync error:', errorMsg);
       }
     }
 
@@ -974,7 +1132,9 @@ export default function App() {
           await deleteDoc(ref);
         }
       } catch (err) {
-        console.warn('Profile deletion cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Profile deletion cloud sync error:', errorMsg);
       }
     }
 
@@ -988,13 +1148,14 @@ export default function App() {
       if (cleanTitle.length < 5 || cleanDate.length < 4 || cleanVenue.length < 3 || cleanDesc.length < 10) {
         continue;
       }
-      const cleanSlides = Array.from(
+      const rawSlides = Array.from(
         new Set([...(ev.galleryUrls || []), ...(ev.imageUrl ? [ev.imageUrl] : [])])
-      )
-        .filter((u) => typeof u === 'string' && u.trim().length > 0)
-        .slice(0, 10)
-        .map((u) => sanitizeString(u, 150000));
-      const primaryImg = cleanSlides[0] || sanitizeString(ev.imageUrl || BNHS_ASSETS.homecomingEvent, 150000);
+      ).filter((u) => typeof u === 'string' && u.trim().length > 0);
+      const budgetedSlides = await fitSlidesToFirestoreBudget(
+        rawSlides.length > 0 ? rawSlides : [BNHS_ASSETS.homecomingEvent]
+      );
+      const primaryImg =
+        budgetedSlides[0] || sanitizeString(ev.imageUrl || BNHS_ASSETS.homecomingEvent, 150000);
       try {
         const eventRef = doc(db, 'events', ev.id);
         const snap = await getDoc(eventRef);
@@ -1006,7 +1167,7 @@ export default function App() {
           venue: cleanVenue,
           description: cleanDesc,
           imageUrl: primaryImg,
-          galleryUrls: cleanSlides.length > 0 ? cleanSlides : [primaryImg],
+          galleryUrls: budgetedSlides.length > 0 ? budgetedSlides : [primaryImg],
           status: ev.status || 'upcoming',
           visibility: 'public' as const,
           updatedAt: serverTimestamp(),
@@ -1016,8 +1177,15 @@ export default function App() {
         } else {
           await setDoc(eventRef, { ...payload, createdAt: serverTimestamp() });
         }
+        setLocalEventOverrides((prev) => {
+          const next = { ...prev };
+          delete next[ev.id];
+          return next;
+        });
       } catch (err) {
-        console.warn('Event cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Event cloud sync error:', errorMsg);
       }
     }
 
@@ -1031,7 +1199,9 @@ export default function App() {
           await deleteDoc(ref);
         }
       } catch (err) {
-        console.warn('Event deletion cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Event deletion cloud sync error:', errorMsg);
       }
     }
 
@@ -1069,8 +1239,15 @@ export default function App() {
         } else {
           await setDoc(annRef, { ...payload, createdAt: serverTimestamp() });
         }
+        setLocalAnnouncementOverrides((prev) => {
+          const next = { ...prev };
+          delete next[ann.id];
+          return next;
+        });
       } catch (err) {
-        console.warn('Announcement cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Announcement cloud sync error:', errorMsg);
       }
     }
 
@@ -1084,7 +1261,9 @@ export default function App() {
           await deleteDoc(ref);
         }
       } catch (err) {
-        console.warn('Announcement deletion cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Announcement deletion cloud sync error:', errorMsg);
       }
     }
 
@@ -1125,8 +1304,15 @@ export default function App() {
         } else {
           await setDoc(spotRef, { ...payload, createdAt: serverTimestamp() });
         }
+        setLocalSpotlightOverrides((prev) => {
+          const next = { ...prev };
+          delete next[st.id];
+          return next;
+        });
       } catch (err) {
-        console.warn('Spotlight cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Spotlight cloud sync error:', errorMsg);
       }
     }
 
@@ -1140,9 +1326,14 @@ export default function App() {
           await deleteDoc(ref);
         }
       } catch (err) {
-        console.warn('Spotlight deletion cloud sync notice:', err);
+        hadError = true;
+        errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('Spotlight deletion cloud sync error:', errorMsg);
       }
     }
+
+    setLastCloudError(errorMsg);
+    return { hadError, errorMsg };
   };
 
   // Automatically sync pending local changes to Cloud Firestore when verified Google session signs in
@@ -1154,9 +1345,9 @@ export default function App() {
     let cancelled = false;
     (async () => {
       setCloudSyncStatus('syncing');
-      await syncAllPendingChangesToCloud(firebaseUser, false);
+      const res = await syncAllPendingChangesToCloud(firebaseUser, true);
       if (!cancelled) {
-        setCloudSyncStatus('synced');
+        setCloudSyncStatus(res.hadError ? 'error' : 'synced');
         setLastSyncedTime(
           new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         );
@@ -1170,7 +1361,6 @@ export default function App() {
 
   // Manual & Automatic Cloud Sync Handler
   const handleManualCloudSync = async () => {
-    setCloudSyncStatus('syncing');
     saveJsonToStorage(STORAGE_KEYS.settings, portalSettings);
     saveJsonToStorage(STORAGE_KEYS.profiles, localProfileOverrides);
     saveJsonToStorage(STORAGE_KEYS.deletedProfiles, deletedProfileUids);
@@ -1182,22 +1372,27 @@ export default function App() {
     saveJsonToStorage(STORAGE_KEYS.deletedSpotlights, deletedSpotlightIds);
     saveJsonToStorage(STORAGE_KEYS.rsvps, myRsvps);
 
-    if (firebaseUser && firebaseUser.emailVerified) {
-      try {
-        await syncAllPendingChangesToCloud(firebaseUser, true);
-      } catch (err) {
-        console.warn('Cloud sync warning:', err);
-      }
+    if (!firebaseUser || !firebaseUser.emailVerified) {
+      setCloudSyncStatus('local');
+      await handleSignIn();
+      return;
     }
 
-    setCloudSyncStatus('synced');
+    setCloudSyncStatus('syncing');
+    const res = await syncAllPendingChangesToCloud(firebaseUser, true);
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setLastSyncedTime(nowStr);
-    setAdminToast(
-      firebaseUser && firebaseUser.emailVerified
-        ? `Cloud Synced (Auto-Saved) · ${nowStr} — All portal edits, photos, and deletions are saved to Cloud Firestore.`
-        : `Cloud Synced (Auto-Saved) · ${nowStr} — All portal edits, photos, and deletions are saved automatically.`
-    );
+    if (res.hadError) {
+      setCloudSyncStatus('error');
+      setAdminToast(
+        `Cloud sync encountered an issue (${res.errorMsg || 'Permission/size check'}). Click Sync again to retry.`
+      );
+    } else {
+      setCloudSyncStatus('synced');
+      setAdminToast(
+        `Cloud Synced (Auto-Saved) · ${nowStr} — All portal edits, sliding photos, and deletions are live across Preview & Published.`
+      );
+    }
   };
 
   // Persist Portal Settings (Logo, Hero Picture, Welcome Text, Directory Header, Hero Caption, Footer Subtitle)
@@ -1211,13 +1406,18 @@ export default function App() {
     setPortalSettings(merged);
     saveJsonToStorage(STORAGE_KEYS.settings, merged);
     saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
-    setCloudSyncStatus('syncing');
+    setHasLocalSettingsEdit(true);
 
     if (firebaseUser && firebaseUser.emailVerified) {
+      const payload = buildPortalSettingsPayload(merged, firebaseUser.uid);
+      if (!isSettingsPayloadValid(payload)) {
+        setCloudSyncStatus('local');
+        return;
+      }
+      setCloudSyncStatus('syncing');
       try {
         const settingsRef = doc(db, 'portal_settings', 'main');
         const snap = await getDoc(settingsRef);
-        const payload = buildPortalSettingsPayload(merged, firebaseUser.uid);
 
         if (snap.exists()) {
           await updateDoc(settingsRef, payload);
@@ -1228,21 +1428,28 @@ export default function App() {
           });
         }
         saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, false);
+        setHasLocalSettingsEdit(false);
+        setLastCloudError(null);
+        setCloudSyncStatus('synced');
       } catch (err) {
-        console.warn('Saved settings locally; cloud sync error:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Saved settings locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
   // Save or update an Alumni Profile from Directory, Dashboard, or Registration
   const handleSaveAlumnusProfile = async (updated: AlumniProfileRecord) => {
-    setDeletedProfileUids((prev) => {
-      const next = { ...prev };
-      delete next[updated.uid];
-      return next;
-    });
+    const nextDeleted = { ...deletedProfileUids };
+    const wasDeletedSeed = Boolean(nextDeleted[updated.uid]);
+    delete nextDeleted[updated.uid];
+    setDeletedProfileUids(nextDeleted);
+
     setLocalProfileOverrides((prev) => ({
       ...prev,
       [updated.uid]: updated,
@@ -1250,111 +1457,191 @@ export default function App() {
     if (currentUser && updated.uid === currentUser.uid) {
       setMyProfile(updated);
     }
-    setCloudSyncStatus('syncing');
 
     if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(updated.uid)) {
+      const cleanName = sanitizeString(updated.fullName, 100);
+      const cleanSection = sanitizeString(updated.formerSection || 'Section A', 60);
+      const cleanCourse = sanitizeString(updated.course || 'BS General', 120);
+      const cleanProf = sanitizeString(updated.profession || 'Alumnus', 100);
+      const cleanEmp = sanitizeString(updated.currentEmployment || 'BNHS Chapter', 120);
+      const cleanCity = sanitizeString(updated.locationCity || 'Barobo, Surigao del Sur', 100);
+      const cleanBio = sanitizeString(updated.bio || 'Once a Student, Always an Eagle!', 600);
+      const cleanSector = sanitizeString(
+        updated.industrySector || 'Engineering & Architecture',
+        80
+      );
+      if (
+        cleanName.length < 2 ||
+        cleanSection.length < 1 ||
+        cleanCourse.length < 2 ||
+        cleanProf.length < 2 ||
+        cleanEmp.length < 2 ||
+        cleanCity.length < 2 ||
+        cleanBio.length < 1 ||
+        cleanSector.length < 2
+      ) {
+        setCloudSyncStatus('local');
+        return;
+      }
+
+      setCloudSyncStatus('syncing');
       try {
         const ref = doc(db, 'alumni_profiles', updated.uid);
         const snap = await getDoc(ref);
-        const payload = {
-          uid: updated.uid,
-          fullName: sanitizeString(updated.fullName, 100),
+        const basePayload = {
+          fullName: cleanName,
           graduationYear: Number(updated.graduationYear),
-          formerSection: sanitizeString(updated.formerSection || 'Section A', 60),
+          formerSection: cleanSection,
           strand: updated.strand,
-          course: sanitizeString(updated.course || 'BS General', 120),
-          profession: sanitizeString(updated.profession || 'Alumnus', 100),
-          currentEmployment: sanitizeString(updated.currentEmployment || 'BNHS Chapter', 120),
-          locationCity: sanitizeString(updated.locationCity || 'Barobo, Surigao del Sur', 100),
-          bio: sanitizeString(updated.bio || 'Once a Student, Always an Eagle!', 600),
+          course: cleanCourse,
+          profession: cleanProf,
+          currentEmployment: cleanEmp,
+          locationCity: cleanCity,
+          bio: cleanBio,
           mentorshipRole: updated.mentorshipRole || 'none',
-          industrySector: sanitizeString(
-            updated.industrySector || 'Engineering & Architecture',
-            80
-          ),
+          industrySector: cleanSector,
           photoUrl: sanitizeString(updated.photoUrl || '', 150000),
           visibility: 'public' as const,
           updatedAt: serverTimestamp(),
         };
         if (snap.exists()) {
-          await updateDoc(ref, payload);
+          await updateDoc(ref, basePayload);
         } else {
           await setDoc(ref, {
-            ...payload,
+            ...basePayload,
+            uid: updated.uid,
             createdAt: serverTimestamp(),
           });
         }
+        if (wasDeletedSeed) {
+          await syncDeletedSeedsToPortalSettings(
+            firebaseUser,
+            nextDeleted,
+            deletedEventIds,
+            deletedAnnouncementIds,
+            deletedSpotlightIds
+          );
+        }
+        setLocalProfileOverrides((prev) => {
+          const next = { ...prev };
+          delete next[updated.uid];
+          return next;
+        });
+        setLastCloudError(null);
+        setCloudSyncStatus('synced');
       } catch (err) {
-        console.warn('Updated profile locally:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Updated profile locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      if (wasDeletedSeed) {
+        saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
+        setHasLocalSettingsEdit(true);
+      }
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
   // Delete an Alumni Profile from Directory & Cloud
   const handleDeleteAlumnusProfile = async (uid: string, _fullName: string) => {
-    setCloudSyncStatus('syncing');
-    setDeletedProfileUids((prev) => ({ ...prev, [uid]: true }));
+    const nextDeleted = { ...deletedProfileUids, [uid]: true };
+    setDeletedProfileUids(nextDeleted);
     setLocalProfileOverrides((prev) => {
       const next = { ...prev };
       delete next[uid];
       return next;
     });
+
     if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(uid)) {
+      setCloudSyncStatus('syncing');
       try {
-        await deleteDoc(doc(db, 'alumni_profiles', uid));
+        const ref = doc(db, 'alumni_profiles', uid);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await deleteDoc(ref);
+        }
+        const ok = await syncDeletedSeedsToPortalSettings(
+          firebaseUser,
+          nextDeleted,
+          deletedEventIds,
+          deletedAnnouncementIds,
+          deletedSpotlightIds
+        );
+        setCloudSyncStatus(ok ? 'synced' : 'error');
       } catch (err) {
-        console.warn('Deleted profile locally:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Deleted profile locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
+      setHasLocalSettingsEdit(true);
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
   // Save or update an Event & its sliding photo gallery
   const handleSaveEvent = async (eventData: AlumniEventRecord, _isNew: boolean) => {
-    const cleanSlides = Array.from(
+    const rawSlides = Array.from(
       new Set([
         ...(eventData.galleryUrls || []),
         ...(eventData.imageUrl ? [eventData.imageUrl] : []),
       ])
-    )
-      .filter((u) => typeof u === 'string' && u.trim().length > 0)
-      .slice(0, 10)
-      .map((u) => sanitizeString(u, 150000));
+    ).filter((u) => typeof u === 'string' && u.trim().length > 0);
 
+    const budgetedSlides = await fitSlidesToFirestoreBudget(
+      rawSlides.length > 0 ? rawSlides : [BNHS_ASSETS.homecomingEvent]
+    );
     const primaryImg =
-      cleanSlides[0] || sanitizeString(eventData.imageUrl || BNHS_ASSETS.homecomingEvent, 150000);
+      budgetedSlides[0] || sanitizeString(eventData.imageUrl || BNHS_ASSETS.homecomingEvent, 150000);
 
     const normalizedEvent: AlumniEventRecord = {
       ...eventData,
       imageUrl: primaryImg,
-      galleryUrls: cleanSlides.length > 0 ? cleanSlides : [primaryImg],
+      galleryUrls: budgetedSlides.length > 0 ? budgetedSlides : [primaryImg],
     };
 
-    setDeletedEventIds((prev) => {
-      const next = { ...prev };
-      delete next[normalizedEvent.id];
-      return next;
-    });
+    const nextDeleted = { ...deletedEventIds };
+    const wasDeletedSeed = Boolean(nextDeleted[normalizedEvent.id]);
+    delete nextDeleted[normalizedEvent.id];
+    setDeletedEventIds(nextDeleted);
+
     setLocalEventOverrides((prev) => ({
       ...prev,
       [normalizedEvent.id]: normalizedEvent,
     }));
-    setCloudSyncStatus('syncing');
 
     if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(normalizedEvent.id)) {
+      const cleanTitle = sanitizeString(normalizedEvent.title, 140);
+      const cleanDate = sanitizeString(normalizedEvent.eventDate, 50);
+      const cleanVenue = sanitizeString(normalizedEvent.venue, 140);
+      const cleanDesc = sanitizeString(normalizedEvent.description, 1000);
+      if (
+        cleanTitle.length < 5 ||
+        cleanDate.length < 4 ||
+        cleanVenue.length < 3 ||
+        cleanDesc.length < 10
+      ) {
+        setCloudSyncStatus('local');
+        return;
+      }
+
+      setCloudSyncStatus('syncing');
       try {
         const eventRef = doc(db, 'events', normalizedEvent.id);
         const snap = await getDoc(eventRef);
         const payload = {
           authorId: firebaseUser.uid,
-          title: sanitizeString(normalizedEvent.title, 140),
+          title: cleanTitle,
           category: normalizedEvent.category,
-          eventDate: sanitizeString(normalizedEvent.eventDate, 50),
-          venue: sanitizeString(normalizedEvent.venue, 140),
-          description: sanitizeString(normalizedEvent.description, 1000),
+          eventDate: cleanDate,
+          venue: cleanVenue,
+          description: cleanDesc,
           imageUrl: primaryImg,
           galleryUrls: normalizedEvent.galleryUrls || [primaryImg],
           status: normalizedEvent.status,
@@ -1370,11 +1657,35 @@ export default function App() {
             createdAt: serverTimestamp(),
           });
         }
+        if (wasDeletedSeed) {
+          await syncDeletedSeedsToPortalSettings(
+            firebaseUser,
+            deletedProfileUids,
+            nextDeleted,
+            deletedAnnouncementIds,
+            deletedSpotlightIds
+          );
+        }
+        setLocalEventOverrides((prev) => {
+          const next = { ...prev };
+          delete next[normalizedEvent.id];
+          return next;
+        });
+        setLastCloudError(null);
+        setCloudSyncStatus('synced');
       } catch (err) {
-        console.warn('Saved event locally:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Saved event locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      if (wasDeletedSeed) {
+        saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
+        setHasLocalSettingsEdit(true);
+      }
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
@@ -1402,48 +1713,82 @@ export default function App() {
 
   // Delete an Event
   const handleDeleteEvent = async (eventId: string, _title: string) => {
-    setCloudSyncStatus('syncing');
-    setDeletedEventIds((prev) => ({ ...prev, [eventId]: true }));
+    const nextDeleted = { ...deletedEventIds, [eventId]: true };
+    setDeletedEventIds(nextDeleted);
     setLocalEventOverrides((prev) => {
       const next = { ...prev };
       delete next[eventId];
       return next;
     });
+
     if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(eventId)) {
+      setCloudSyncStatus('syncing');
       try {
-        await deleteDoc(doc(db, 'events', eventId));
+        const ref = doc(db, 'events', eventId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await deleteDoc(ref);
+        }
+        const ok = await syncDeletedSeedsToPortalSettings(
+          firebaseUser,
+          deletedProfileUids,
+          nextDeleted,
+          deletedAnnouncementIds,
+          deletedSpotlightIds
+        );
+        setCloudSyncStatus(ok ? 'synced' : 'error');
       } catch (err) {
-        console.warn('Deleted event locally:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Deleted event locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
+      setHasLocalSettingsEdit(true);
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
   // Save or update an Announcement
   const handleSaveAnnouncement = async (annData: AnnouncementRecord, _isNew: boolean) => {
-    setCloudSyncStatus('syncing');
-    setDeletedAnnouncementIds((prev) => {
-      const next = { ...prev };
-      delete next[annData.id];
-      return next;
-    });
+    const nextDeleted = { ...deletedAnnouncementIds };
+    const wasDeletedSeed = Boolean(nextDeleted[annData.id]);
+    delete nextDeleted[annData.id];
+    setDeletedAnnouncementIds(nextDeleted);
+
     setLocalAnnouncementOverrides((prev) => ({
       ...prev,
       [annData.id]: annData,
     }));
 
     if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(annData.id)) {
+      const cleanAuthor = sanitizeString(annData.authorName || 'BNHS Alumni Federation', 100);
+      const cleanTitle = sanitizeString(annData.title, 150);
+      const cleanSummary = sanitizeString(annData.summary, 300);
+      const cleanContent = sanitizeString(annData.content, 2000);
+      if (
+        cleanAuthor.length < 2 ||
+        cleanTitle.length < 5 ||
+        cleanSummary.length < 10 ||
+        cleanContent.length < 20
+      ) {
+        setCloudSyncStatus('local');
+        return;
+      }
+
+      setCloudSyncStatus('syncing');
       try {
         const annRef = doc(db, 'announcements', annData.id);
         const snap = await getDoc(annRef);
         const payload = {
           authorId: firebaseUser.uid,
-          authorName: sanitizeString(annData.authorName, 100),
-          title: sanitizeString(annData.title, 150),
+          authorName: cleanAuthor,
+          title: cleanTitle,
           category: annData.category,
-          summary: sanitizeString(annData.summary, 300),
-          content: sanitizeString(annData.content, 2000),
+          summary: cleanSummary,
+          content: cleanContent,
           status: 'published' as const,
           visibility: 'public' as const,
           updatedAt: serverTimestamp(),
@@ -1457,60 +1802,120 @@ export default function App() {
             createdAt: serverTimestamp(),
           });
         }
+        if (wasDeletedSeed) {
+          await syncDeletedSeedsToPortalSettings(
+            firebaseUser,
+            deletedProfileUids,
+            deletedEventIds,
+            nextDeleted,
+            deletedSpotlightIds
+          );
+        }
+        setLocalAnnouncementOverrides((prev) => {
+          const next = { ...prev };
+          delete next[annData.id];
+          return next;
+        });
+        setLastCloudError(null);
+        setCloudSyncStatus('synced');
       } catch (err) {
-        console.warn('Saved announcement locally:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Saved announcement locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      if (wasDeletedSeed) {
+        saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
+        setHasLocalSettingsEdit(true);
+      }
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
   // Delete an Announcement
   const handleDeleteAnnouncement = async (annId: string, _title: string) => {
-    setCloudSyncStatus('syncing');
-    setDeletedAnnouncementIds((prev) => ({ ...prev, [annId]: true }));
+    const nextDeleted = { ...deletedAnnouncementIds, [annId]: true };
+    setDeletedAnnouncementIds(nextDeleted);
     setLocalAnnouncementOverrides((prev) => {
       const next = { ...prev };
       delete next[annId];
       return next;
     });
+
     if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(annId)) {
+      setCloudSyncStatus('syncing');
       try {
-        await deleteDoc(doc(db, 'announcements', annId));
+        const ref = doc(db, 'announcements', annId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await deleteDoc(ref);
+        }
+        const ok = await syncDeletedSeedsToPortalSettings(
+          firebaseUser,
+          deletedProfileUids,
+          deletedEventIds,
+          nextDeleted,
+          deletedSpotlightIds
+        );
+        setCloudSyncStatus(ok ? 'synced' : 'error');
       } catch (err) {
-        console.warn('Deleted announcement locally:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Deleted announcement locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
+      setHasLocalSettingsEdit(true);
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
   // Save or update a Spotlight Story
   const handleSaveSpotlight = async (storyData: SpotlightStoryRecord, _isNew: boolean) => {
-    setCloudSyncStatus('syncing');
-    setDeletedSpotlightIds((prev) => {
-      const next = { ...prev };
-      delete next[storyData.id];
-      return next;
-    });
+    const nextDeleted = { ...deletedSpotlightIds };
+    const wasDeletedSeed = Boolean(nextDeleted[storyData.id]);
+    delete nextDeleted[storyData.id];
+    setDeletedSpotlightIds(nextDeleted);
+
     setLocalSpotlightOverrides((prev) => ({
       ...prev,
       [storyData.id]: storyData,
     }));
 
     if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(storyData.id)) {
+      const cleanNominator = sanitizeString(storyData.nominatorName || 'BNHS Alumni Federation', 100);
+      const cleanNominee = sanitizeString(storyData.nomineeName, 100);
+      const cleanProfession = sanitizeString(storyData.profession, 100);
+      const cleanMilestone = sanitizeString(storyData.milestoneTitle, 140);
+      const cleanStory = sanitizeString(storyData.story, 800);
+      if (
+        cleanNominator.length < 2 ||
+        cleanNominee.length < 2 ||
+        cleanProfession.length < 2 ||
+        cleanMilestone.length < 5 ||
+        cleanStory.length < 15
+      ) {
+        setCloudSyncStatus('local');
+        return;
+      }
+
+      setCloudSyncStatus('syncing');
       try {
         const spotRef = doc(db, 'spotlight_nominations', storyData.id);
         const snap = await getDoc(spotRef);
         const payload = {
           nominatorUid: firebaseUser.uid,
-          nominatorName: sanitizeString(storyData.nominatorName, 100),
-          nomineeName: sanitizeString(storyData.nomineeName, 100),
+          nominatorName: cleanNominator,
+          nomineeName: cleanNominee,
           graduationYear: Number(storyData.graduationYear),
           strand: storyData.strand,
-          profession: sanitizeString(storyData.profession, 100),
-          milestoneTitle: sanitizeString(storyData.milestoneTitle, 140),
-          story: sanitizeString(storyData.story, 800),
+          profession: cleanProfession,
+          milestoneTitle: cleanMilestone,
+          story: cleanStory,
           visibility: 'public' as const,
           updatedAt: serverTimestamp(),
         };
@@ -1523,31 +1928,75 @@ export default function App() {
             createdAt: serverTimestamp(),
           });
         }
+        if (wasDeletedSeed) {
+          await syncDeletedSeedsToPortalSettings(
+            firebaseUser,
+            deletedProfileUids,
+            deletedEventIds,
+            deletedAnnouncementIds,
+            nextDeleted
+          );
+        }
+        setLocalSpotlightOverrides((prev) => {
+          const next = { ...prev };
+          delete next[storyData.id];
+          return next;
+        });
+        setLastCloudError(null);
+        setCloudSyncStatus('synced');
       } catch (err) {
-        console.warn('Saved spotlight locally:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Saved spotlight locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      if (wasDeletedSeed) {
+        saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
+        setHasLocalSettingsEdit(true);
+      }
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
   // Delete a Spotlight Story
   const handleDeleteSpotlight = async (storyId: string, _nomineeName: string) => {
-    setCloudSyncStatus('syncing');
-    setDeletedSpotlightIds((prev) => ({ ...prev, [storyId]: true }));
+    const nextDeleted = { ...deletedSpotlightIds, [storyId]: true };
+    setDeletedSpotlightIds(nextDeleted);
     setLocalSpotlightOverrides((prev) => {
       const next = { ...prev };
       delete next[storyId];
       return next;
     });
+
     if (firebaseUser && firebaseUser.emailVerified && isValidFirestoreId(storyId)) {
+      setCloudSyncStatus('syncing');
       try {
-        await deleteDoc(doc(db, 'spotlight_nominations', storyId));
+        const ref = doc(db, 'spotlight_nominations', storyId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await deleteDoc(ref);
+        }
+        const ok = await syncDeletedSeedsToPortalSettings(
+          firebaseUser,
+          deletedProfileUids,
+          deletedEventIds,
+          deletedAnnouncementIds,
+          nextDeleted
+        );
+        setCloudSyncStatus(ok ? 'synced' : 'error');
       } catch (err) {
-        console.warn('Deleted spotlight locally:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('Deleted spotlight locally; cloud sync error:', msg);
+        setLastCloudError(msg);
+        setCloudSyncStatus('error');
       }
+    } else {
+      saveJsonToStorage(STORAGE_KEYS.hasLocalSettingsEdit, true);
+      setHasLocalSettingsEdit(true);
+      setCloudSyncStatus('local');
     }
-    setCloudSyncStatus('synced');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   };
 
@@ -1625,18 +2074,36 @@ export default function App() {
             <button
               type="button"
               onClick={handleManualCloudSync}
-              title={`Cloud Synced (Auto-Saved) · Last saved ${lastSyncedTime} — Click to verify & sync all changes`}
-              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg bg-[#650019] border border-emerald-400/50 text-[10px] sm:text-[11px] font-bold text-emerald-200 hover:bg-black/30 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-sm"
+              title={
+                cloudSyncStatus === 'error'
+                  ? `Cloud sync error: ${lastCloudError || 'Click to retry syncing to Firestore'}`
+                  : isCloudVerified
+                    ? `Cloud Synced (Auto-Saved) across Preview & Live Published · Last saved ${lastSyncedTime}`
+                    : 'Auto-saved in this browser. Click to sign in with Google and push live to Published.'
+              }
+              className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-[11px] font-bold transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-sm border ${
+                cloudSyncStatus === 'error'
+                  ? 'bg-red-950 border-red-400/70 text-red-200 hover:bg-red-900'
+                  : isCloudVerified && pendingCloudCount === 0 && cloudSyncStatus !== 'syncing'
+                    ? 'bg-[#650019] border-emerald-400/50 text-emerald-200 hover:bg-black/30'
+                    : 'bg-[#650019] border-[#D4AF37]/70 text-[#D4AF37] hover:bg-black/30'
+              }`}
             >
               {cloudSyncStatus === 'syncing' ? (
                 <Cloud className="w-3.5 h-3.5 text-[#D4AF37] animate-pulse shrink-0" />
-              ) : (
+              ) : isCloudVerified && pendingCloudCount === 0 && cloudSyncStatus !== 'error' ? (
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              ) : (
+                <Cloud className="w-3.5 h-3.5 shrink-0" />
               )}
               <span>
                 {cloudSyncStatus === 'syncing'
                   ? 'Cloud Syncing (Auto-Saving)...'
-                  : 'Cloud Synced (Auto-Saved)'}
+                  : cloudSyncStatus === 'error'
+                    ? 'Cloud Sync Retry Needed'
+                    : isCloudVerified && pendingCloudCount === 0
+                      ? 'Cloud Synced (Auto-Saved)'
+                      : `Auto-Saved Locally${pendingCloudCount > 0 ? ` (${pendingCloudCount} for Live)` : ''} · Sync Live`}
               </span>
             </button>
 
@@ -1702,6 +2169,28 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 w-full">
+        {!isCloudVerified && pendingCloudCount > 0 && (
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4">
+            <div className="p-3.5 sm:p-4 rounded-xl bg-[#450012] border-2 border-[#D4AF37] text-white text-xs sm:text-sm flex flex-wrap items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Cloud className="w-4 h-4 text-[#D4AF37] shrink-0" />
+                <span>
+                  You have <strong>{pendingCloudCount}</strong> auto-saved local edit(s)/deletion(s). Sign in with Google to mirror them live on Preview & Published.
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={googleSigningIn}
+                onClick={handleManualCloudSync}
+                className="px-3.5 py-2 rounded-lg bg-[#D4AF37] text-[#450012] text-xs font-bold hover:bg-[#e3c14d] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                {googleSigningIn ? 'Opening Google Sign-In...' : 'Sign In with Google & Sync Live'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {adminToast && (
           <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-5">
             <div className="p-4 rounded-xl bg-[#450012] border border-[#D4AF37] text-white text-xs sm:text-sm flex items-center justify-between gap-3 shadow-lg">
@@ -2171,6 +2660,7 @@ export default function App() {
             userRsvps={myRsvps}
             onSignIn={handleSignIn}
             onSaveEvent={handleSaveEvent}
+            onSaveAnnouncement={handleSaveAnnouncement}
             onSaveLocalRsvp={(eventId, rsvp) =>
               setMyRsvps((prev) => ({ ...prev, [eventId]: rsvp }))
             }
@@ -2189,6 +2679,7 @@ export default function App() {
             userRsvps={myRsvps}
             onSignIn={handleSignIn}
             onSaveEvent={handleSaveEvent}
+            onSaveAnnouncement={handleSaveAnnouncement}
             onSaveLocalRsvp={(eventId, rsvp) =>
               setMyRsvps((prev) => ({ ...prev, [eventId]: rsvp }))
             }
@@ -2386,6 +2877,8 @@ export default function App() {
         onSaveAlumnusProfile={handleSaveAlumnusProfile}
         onSaveAnnouncement={handleSaveAnnouncement}
         onSaveSpotlight={handleSaveSpotlight}
+        isCloudAuthenticated={isCloudVerified}
+        onSyncCloudNow={handleManualCloudSync}
       />
 
       {/* Unified Delete Menu Modal (All Delete Menus Combined into One) */}
@@ -2539,17 +3032,29 @@ export default function App() {
             <button
               type="button"
               onClick={handleManualCloudSync}
-              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-400/40 text-emerald-200 hover:bg-emerald-900/60 transition-colors text-[11px] font-semibold cursor-pointer"
+              className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border transition-colors text-[11px] font-semibold cursor-pointer ${
+                cloudSyncStatus === 'error'
+                  ? 'bg-red-950/70 border-red-400/50 text-red-200 hover:bg-red-900/70'
+                  : isCloudVerified && pendingCloudCount === 0 && cloudSyncStatus !== 'syncing'
+                    ? 'bg-emerald-950/60 border-emerald-400/40 text-emerald-200 hover:bg-emerald-900/60'
+                    : 'bg-amber-950/60 border-[#D4AF37]/50 text-[#D4AF37] hover:bg-amber-900/60'
+              }`}
             >
               {cloudSyncStatus === 'syncing' ? (
                 <Cloud className="w-3.5 h-3.5 text-[#D4AF37] animate-pulse" />
-              ) : (
+              ) : isCloudVerified && pendingCloudCount === 0 && cloudSyncStatus !== 'error' ? (
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Cloud className="w-3.5 h-3.5" />
               )}
               <span>
                 {cloudSyncStatus === 'syncing'
                   ? 'Cloud Syncing (Auto-Saving)...'
-                  : `Cloud Synced (Auto-Saved) · ${lastSyncedTime}`}
+                  : cloudSyncStatus === 'error'
+                    ? 'Cloud Sync Retry Needed — Click to Sync Live'
+                    : isCloudVerified && pendingCloudCount === 0
+                      ? `Cloud Synced (Auto-Saved) · Live on Preview & Published · ${lastSyncedTime}`
+                      : `Auto-Saved Locally${pendingCloudCount > 0 ? ` (${pendingCloudCount} pending)` : ''} · Click to Sync Live`}
               </span>
             </button>
             <button
