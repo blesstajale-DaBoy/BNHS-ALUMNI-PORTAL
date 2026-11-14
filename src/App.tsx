@@ -37,11 +37,18 @@ import {
   Trash2,
 } from 'lucide-react';
 import {
+  ALLOWED_ANNOUNCEMENT_CATEGORIES,
+  ALLOWED_EVENT_CATEGORIES,
+  ALLOWED_MENTORSHIP_ROLES,
+  ALLOWED_STRANDS,
+  AnnouncementCategory,
   auth,
   db,
+  EventCategory,
   fitSlidesToFirestoreBudget,
   handleFirestoreError,
   logOutUser,
+  MentorshipRole,
   OperationType,
   sanitizeId,
   sanitizeString,
@@ -485,7 +492,10 @@ export default function App() {
               );
             }
 
-            setCloudSyncStatus(auth.currentUser?.emailVerified ? 'synced' : 'local');
+            setCloudSyncStatus((prev) => {
+              if (prev === 'error' || prev === 'syncing') return prev;
+              return auth.currentUser?.emailVerified ? 'synced' : 'local';
+            });
             setLastSyncedTime(
               new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             );
@@ -1089,17 +1099,25 @@ export default function App() {
       try {
         const ref = doc(db, 'alumni_profiles', prof.uid);
         const snap = await getDoc(ref);
+        const safeStrand = (ALLOWED_STRANDS as readonly string[]).includes(prof.strand)
+          ? prof.strand
+          : 'STEM';
+        const safeMentorship: MentorshipRole = (
+          ALLOWED_MENTORSHIP_ROLES as readonly string[]
+        ).includes(prof.mentorshipRole)
+          ? prof.mentorshipRole
+          : 'none';
         const basePayload = {
           fullName: cleanName,
-          graduationYear: Math.min(2100, Math.max(1971, Number(prof.graduationYear) || 2020)),
+          graduationYear: Math.round(Math.min(2100, Math.max(1971, Number(prof.graduationYear) || 2020))),
           formerSection: cleanSection,
-          strand: prof.strand || 'STEM',
+          strand: safeStrand,
           course: cleanCourse,
           profession: cleanProf,
           currentEmployment: cleanEmp,
           locationCity: cleanCity,
           bio: cleanBio,
-          mentorshipRole: prof.mentorshipRole || 'none',
+          mentorshipRole: safeMentorship,
           industrySector: cleanSector,
           photoUrl: sanitizeString(prof.photoUrl || '', 150000),
           visibility: 'public' as const,
@@ -1159,16 +1177,26 @@ export default function App() {
       try {
         const eventRef = doc(db, 'events', ev.id);
         const snap = await getDoc(eventRef);
+        const safeCategory: EventCategory = (
+          ALLOWED_EVENT_CATEGORIES as readonly string[]
+        ).includes(ev.category)
+          ? ev.category
+          : 'Homecoming';
+        const safeStatus = (['upcoming', 'ongoing', 'completed', 'archived'] as const).includes(
+          ev.status
+        )
+          ? ev.status
+          : 'upcoming';
         const payload = {
           authorId: user.uid,
           title: cleanTitle,
-          category: ev.category,
+          category: safeCategory,
           eventDate: cleanDate,
           venue: cleanVenue,
           description: cleanDesc,
           imageUrl: primaryImg,
           galleryUrls: budgetedSlides.length > 0 ? budgetedSlides : [primaryImg],
-          status: ev.status || 'upcoming',
+          status: safeStatus,
           visibility: 'public' as const,
           updatedAt: serverTimestamp(),
         };
@@ -1223,11 +1251,16 @@ export default function App() {
       try {
         const annRef = doc(db, 'announcements', ann.id);
         const snap = await getDoc(annRef);
+        const safeAnnCategory: AnnouncementCategory = (
+          ALLOWED_ANNOUNCEMENT_CATEGORIES as readonly string[]
+        ).includes(ann.category)
+          ? ann.category
+          : 'Official Bulletin';
         const payload = {
           authorId: user.uid,
           authorName: cleanAuthor,
           title: cleanTitle,
-          category: ann.category,
+          category: safeAnnCategory,
           summary: cleanSummary,
           content: cleanContent,
           status: 'published' as const,
@@ -1287,12 +1320,15 @@ export default function App() {
       try {
         const spotRef = doc(db, 'spotlight_nominations', st.id);
         const snap = await getDoc(spotRef);
+        const safeSpotStrand = (ALLOWED_STRANDS as readonly string[]).includes(st.strand)
+          ? st.strand
+          : 'STEM';
         const payload = {
           nominatorUid: user.uid,
           nominatorName: cleanNominator,
           nomineeName: cleanNominee,
-          graduationYear: Math.min(2100, Math.max(1971, Number(st.graduationYear) || 2020)),
-          strand: st.strand || 'STEM',
+          graduationYear: Math.round(Math.min(2100, Math.max(1971, Number(st.graduationYear) || 2020))),
+          strand: safeSpotStrand,
           profession: cleanProfession,
           milestoneTitle: cleanMilestone,
           story: cleanStory,

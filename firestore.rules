@@ -264,7 +264,7 @@ service cloud.firestore {
 
     // 2. Portal Settings (Logo, Hero Picture, Hero Copy, Directory Copy & Footer Copy)
     match /portal_settings/{settingId} {
-      allow get: if isValidId(settingId) && existing().visibility == 'public';
+      allow get: if isValidId(settingId) && (resource == null || existing().visibility == 'public');
       allow list: if existing().visibility == 'public';
       allow create: if isVerifiedUser() && isValidId(settingId) && isValidPortalSettings(incoming()) &&
         incoming().createdAt == request.time &&
@@ -289,8 +289,9 @@ service cloud.firestore {
     // 3. Public Alumni Directory Profiles (Zero PII)
     match /alumni_profiles/{uid} {
       allow get: if isValidId(uid) && (
-        existing().visibility == 'public' ||
-        (isSignedIn() && (request.auth.uid == uid || isAdmin()))
+        (resource == null && isVerifiedUser()) ||
+        (isSignedIn() && (request.auth.uid == uid || isAdmin())) ||
+        (resource != null && existing().visibility == 'public')
       );
       allow list: if existing().visibility == 'public' ||
         (isSignedIn() && existing().uid == request.auth.uid);
@@ -334,7 +335,7 @@ service cloud.firestore {
 
     // 5. Official Alumni Events
     match /events/{eventId} {
-      allow get: if isValidId(eventId) && existing().visibility == 'public';
+      allow get: if isValidId(eventId) && (resource == null || existing().visibility == 'public');
       allow list: if existing().visibility == 'public';
       allow create: if isVerifiedUser() && isValidId(eventId) && isValidAlumniEvent(incoming()) &&
         incoming().createdAt == request.time &&
@@ -353,7 +354,7 @@ service cloud.firestore {
 
     // 6. Event RSVPs
     match /event_rsvps/{rsvpId} {
-      allow get: if isSignedIn() && isValidId(rsvpId) && (existing().uid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(rsvpId) && (resource == null || existing().uid == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && existing().uid == request.auth.uid;
       allow create: if isVerifiedUser() && isValidId(rsvpId) && isValidEventRsvp(incoming()) &&
         incoming().createdAt == request.time &&
@@ -373,7 +374,7 @@ service cloud.firestore {
 
     // 7. Official Announcements
     match /announcements/{announcementId} {
-      allow get: if isValidId(announcementId) && existing().visibility == 'public';
+      allow get: if isValidId(announcementId) && (resource == null || existing().visibility == 'public');
       allow list: if existing().visibility == 'public';
       allow create: if isVerifiedUser() && isValidId(announcementId) && isValidAnnouncement(incoming()) &&
         incoming().createdAt == request.time &&
@@ -392,7 +393,7 @@ service cloud.firestore {
 
     // 8. Alumni Spotlight Nominations
     match /spotlight_nominations/{nominationId} {
-      allow get: if isValidId(nominationId) && existing().visibility == 'public';
+      allow get: if isValidId(nominationId) && (resource == null || existing().visibility == 'public');
       allow list: if existing().visibility == 'public';
       allow create: if isVerifiedUser() && isValidId(nominationId) && isValidSpotlightNomination(incoming()) &&
         incoming().createdAt == request.time &&
